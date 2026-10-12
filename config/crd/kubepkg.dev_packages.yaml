@@ -241,6 +241,24 @@ spec:
                   - revision
                   type: object
                 type: array
+              retry:
+                description: |-
+                  Retry is set while a change that failed waits to be tried again.
+                  The operator retries on its own, waiting longer after each failure;
+                  the kubepkg.dev/retry annotation tries again at once.
+                properties:
+                  attempts:
+                    description: Attempts is how many times the change has failed
+                      so far.
+                    format: int32
+                    type: integer
+                  nextAttempt:
+                    description: NextAttempt is when the operator tries it again.
+                    format: date-time
+                    type: string
+                required:
+                - attempts
+                type: object
               version:
                 description: Version is the package version currently applied.
                 type: string
@@ -476,6 +494,24 @@ spec:
                   - revision
                   type: object
                 type: array
+              retry:
+                description: |-
+                  Retry is set while a change that failed waits to be tried again.
+                  The operator retries on its own, waiting longer after each failure;
+                  the kubepkg.dev/retry annotation tries again at once.
+                properties:
+                  attempts:
+                    description: Attempts is how many times the change has failed
+                      so far.
+                    format: int32
+                    type: integer
+                  nextAttempt:
+                    description: NextAttempt is when the operator tries it again.
+                    format: date-time
+                    type: string
+                required:
+                - attempts
+                type: object
               version:
                 description: Version is the package version currently applied.
                 type: string
@@ -711,6 +747,24 @@ spec:
                   - revision
                   type: object
                 type: array
+              retry:
+                description: |-
+                  Retry is set while a change that failed waits to be tried again.
+                  The operator retries on its own, waiting longer after each failure;
+                  the kubepkg.dev/retry annotation tries again at once.
+                properties:
+                  attempts:
+                    description: Attempts is how many times the change has failed
+                      so far.
+                    format: int32
+                    type: integer
+                  nextAttempt:
+                    description: NextAttempt is when the operator tries it again.
+                    format: date-time
+                    type: string
+                required:
+                - attempts
+                type: object
               version:
                 description: Version is the package version currently applied.
                 type: string

@@ -64,6 +64,9 @@ Short names: `pkg`, `pkgs`.
 | `history[].phase` | string |  |
 | `history[].revision` | integer, required |  |
 | `history[].version` | string |  |
+| `retry` | object | Retry is set while a change that failed waits to be tried again. The operator retries on its own, waiting longer after each failure; the kubepkg.dev/retry annotation tries again at once. |
+| `retry.attempts` | integer, required | Attempts is how many times the change has failed so far. |
+| `retry.nextAttempt` | string | NextAttempt is when the operator tries it again. |
 | `version` | string | Version is the package version currently applied. |
 
 

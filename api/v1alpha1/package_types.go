@@ -175,6 +175,22 @@ type PackageStatus struct {
 	// History lists recent revisions, newest first.
 	// +optional
 	History []RevisionSummary `json:"history,omitempty"`
+
+	// Retry is set while a change that failed waits to be tried again.
+	// The operator retries on its own, waiting longer after each failure;
+	// the kubepkg.dev/retry annotation tries again at once.
+	// +optional
+	Retry *RetryStatus `json:"retry,omitempty"`
+}
+
+// RetryStatus tells when a change that failed is tried again.
+type RetryStatus struct {
+	// Attempts is how many times the change has failed so far.
+	Attempts int32 `json:"attempts"`
+
+	// NextAttempt is when the operator tries it again.
+	// +optional
+	NextAttempt *metav1.Time `json:"nextAttempt,omitempty"`
 }
 
 // DependencyStatus represents the readiness status of a dependency

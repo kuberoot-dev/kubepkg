@@ -94,8 +94,27 @@ When a package is not ready, its `Ready` condition says why:
 | `CRDOwnershipConflict` | another package owns a CRD this one ships | remove the other package, or drop the CRD from one of them |
 | `VariantNotFound` | the package has no such variant | fix `spec.variant` |
 | `RolledBack` (ready) | the package runs an earlier revision you asked for with `kubepkg rollback` | change the Package, or set `kubepkg.dev/retry`, when you want it to follow its spec again |
-| `UpgradeRolledBack` | the last upgrade failed and the package went back to the previous revision | read the message, fix, then change the Package or set `kubepkg.dev/retry` to try again |
-| `UpgradeFailed` | the last upgrade failed and could not be rolled back | fix forward: a corrected version or values, or set `kubepkg.dev/retry` to try the same again |
+| `UpgradeRolledBack` | the last upgrade failed and the package went back to the previous revision | read the message and fix the cause; the operator tries again on its own, or set `kubepkg.dev/retry` to try now |
+| `UpgradeFailed` | the last install or upgrade failed and could not be rolled back | fix forward: a corrected version or values; the operator tries again on its own, or set `kubepkg.dev/retry` to try now |
+
+## Failed installs and upgrades are tried again
+
+A change that failed is tried again by the operator, without anybody asking: first 30 seconds after the failure, then after twice as long each time, at most every 10 minutes. Many failures go away on their own, such as a registry that was down or a requirement that was still starting, and a cluster nobody watches should not stay broken because of them. The Package shows where it stands:
+
+```yaml
+status:
+  retry:
+    attempts: 3                          # failed three times so far
+    nextAttempt: "2026-10-12T10:07:30Z"  # when the operator tries again
+```
+
+The `Ready` message says the same. A change to what the Package resolves to is tried at once, without waiting: an edit to the Package, a new build in the repository that fixes the problem, or the annotation `kubepkg.dev/retry` set to a new value:
+
+```bash
+kubectl annotate package cert-manager kubepkg.dev/retry="$(date +%s)" --overwrite
+```
+
+Every try is a revision, so `kubepkg history` shows each of them; while a change keeps failing, older revisions are pruned down to `revisionHistoryLimit`, never the one a failed upgrade returns to. The operator flags `--retry-backoff` and `--retry-backoff-max` (chart values `retry.backoff` and `retry.maxBackoff`) change the waits. A rollback you asked for is not undone by retries: it holds until the Package changes.
 
 ## Rolling back by hand
 

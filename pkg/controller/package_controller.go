@@ -73,6 +73,13 @@ type PackageReconciler struct {
 	// with one worker every other package, dependents of packages that
 	// are already ready included, waits behind the slowest install.
 	Workers int
+	// RetryBackoff is how long a change that failed waits before it is
+	// tried again; each further failure doubles the wait, up to
+	// RetryBackoffMax. Defaults 30s and 10m.
+	RetryBackoff    time.Duration
+	RetryBackoffMax time.Duration
+	// now is the clock, replaced in tests.
+	now func() time.Time
 }
 
 // Reconcile is the main loop.
@@ -95,6 +102,7 @@ func (r *PackageReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
+	pkg.Status.Retry = nil // set again while a failed change waits
 	res, err := r.reconcile(ctx, pkg)
 	recordPackage(pkg)
 	if uerr := r.Status().Update(ctx, pkg); uerr != nil {
@@ -201,15 +209,32 @@ func (r *PackageReconciler) reconcile(ctx context.Context, pkg *v1.Package) (ctr
 	case latest != nil && latest.Status.Phase == v1.PhaseApplying && latest.Annotations[AnnotationDesiredDigest] == d.digest:
 		return r.progress(ctx, pkg, latest, d, &revs, src)
 	case latest != nil && latest.Annotations[AnnotationDesiredDigest] == d.digest && held(latest):
-		// A failed or rolled-back state stays until the desired state
-		// changes; retrying the same thing in a loop helps nobody.
-		r.reportHeld(pkg, latest)
-		return ctrl.Result{}, nil
+		// A failed state is tried again on its own, waiting longer after
+		// every failure, so a cluster nobody watches recovers once the
+		// cause goes away, without retrying in a loop. A rollback someone
+		// asked for holds until the desired state changes.
+		failed := failedAttempt(revs, d.digest)
+		if latest.Annotations[AnnotationRollbackRequested] == "true" || failed == nil {
+			r.reportHeld(pkg, latest)
+			return ctrl.Result{}, nil
+		}
+		if wait := r.scheduleRetry(pkg, failed); wait > 0 {
+			r.reportHeld(pkg, latest)
+			return ctrl.Result{RequeueAfter: wait}, nil
+		}
+		attempt := attemptOf(failed) + 1
+		pkg.Status.Retry = nil
+		// Every attempt adds revisions; keep the history bounded while
+		// the change keeps failing.
+		if err := r.prune(ctx, pkg, &revs); err != nil {
+			return ctrl.Result{}, err
+		}
+		return r.applyNew(ctx, pkg, d, &revs, src, attempt)
 	case latest != nil && latest.Annotations[AnnotationDesiredDigest] == d.digest &&
 		latest.Status.Phase == v1.PhaseApplied && sameComponents(latest.Spec.Components, d.components):
 		return r.observe(ctx, pkg, latest, d)
 	}
-	return r.applyNew(ctx, pkg, d, &revs, src)
+	return r.applyNew(ctx, pkg, d, &revs, src, 1)
 }
 
 func held(rev *v1.PackageRevision) bool {
@@ -230,10 +255,10 @@ func (r *PackageReconciler) reportHeld(pkg *v1.Package, rev *v1.PackageRevision)
 			setReady(pkg, metav1.ConditionTrue, v1.ReasonRolledBack, rev.Status.Message+"; change the Package or set "+AnnotationRetry+" to follow it again")
 			return
 		}
-		setReady(pkg, metav1.ConditionFalse, reason, rev.Status.Message+"; change the Package or set "+AnnotationRetry+" to try again")
+		setReady(pkg, metav1.ConditionFalse, reason, rev.Status.Message+retryNote(pkg))
 		return
 	}
-	setReady(pkg, metav1.ConditionFalse, v1.ReasonUpgradeFailed, rev.Status.Message+"; change the Package or set "+AnnotationRetry+" to try again")
+	setReady(pkg, metav1.ConditionFalse, v1.ReasonUpgradeFailed, rev.Status.Message+retryNote(pkg))
 }
 
 // observe keeps an applied revision honest: the backend may report a release
@@ -257,8 +282,9 @@ func (r *PackageReconciler) observe(ctx context.Context, pkg *v1.Package, rev *v
 	return ctrl.Result{}, nil
 }
 
-// applyNew records a new revision and applies it.
-func (r *PackageReconciler) applyNew(ctx context.Context, pkg *v1.Package, d *desiredState, revs *[]v1.PackageRevision, src *v1.PackageSource) (ctrl.Result, error) {
+// applyNew records a new revision and applies it. attempt counts the
+// tries at the same desired state.
+func (r *PackageReconciler) applyNew(ctx context.Context, pkg *v1.Package, d *desiredState, revs *[]v1.PackageRevision, src *v1.PackageSource, attempt int) (ctrl.Result, error) {
 	if r.CRDs != nil && pkg.Spec.CRDPolicy != v1.CRDPolicyDelete {
 		// A CRD the new version stops shipping would be deleted by its
 		// release, and every object of it with it; keep it instead.
@@ -274,7 +300,7 @@ func (r *PackageReconciler) applyNew(ctx context.Context, pkg *v1.Package, d *de
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        fmt.Sprintf("%s-%d", pkg.Name, n),
 			Labels:      map[string]string{v1.LabelPackage: pkg.Name},
-			Annotations: map[string]string{AnnotationDesiredDigest: d.digest},
+			Annotations: map[string]string{AnnotationDesiredDigest: d.digest, AnnotationAttempt: strconv.Itoa(attempt)},
 		},
 		Spec: v1.PackageRevisionSpec{
 			Package: pkg.Name, Revision: n, Version: d.version, Variant: d.variant, RollbackSafe: d.rollbackSafe && len(moved(lastGood(*revs, n), d)) == 0,
@@ -294,7 +320,11 @@ func (r *PackageReconciler) applyNew(ctx context.Context, pkg *v1.Package, d *de
 		return ctrl.Result{}, err
 	}
 	*revs = append(*revs, *rev)
-	setReady(pkg, metav1.ConditionFalse, v1.ReasonProgressing, fmt.Sprintf("applying revision %d", n))
+	msg := fmt.Sprintf("applying revision %d", n)
+	if attempt > 1 {
+		msg += fmt.Sprintf(", attempt %d", attempt)
+	}
+	setReady(pkg, metav1.ConditionFalse, v1.ReasonProgressing, msg)
 	return r.progress(ctx, pkg, &(*revs)[len(*revs)-1], d, revs, src)
 }
 
@@ -438,11 +468,23 @@ func lastGood(revs []v1.PackageRevision, before int64) *v1.PackageRevision {
 // fail settles a failed revision: rolls the package back as a whole when
 // that is allowed and safe, otherwise leaves it for a forward fix.
 func (r *PackageReconciler) fail(ctx context.Context, pkg *v1.Package, rev *v1.PackageRevision, d *desiredState, applied []desiredComponent, revs *[]v1.PackageRevision, msg string) (ctrl.Result, error) {
+	// When it failed decides when it is tried again. Updating the
+	// metadata returns the stored status, so keep what this pass set.
+	status := rev.Status.DeepCopy()
+	if rev.Annotations == nil {
+		rev.Annotations = map[string]string{}
+	}
+	rev.Annotations[AnnotationFailedAt] = r.clock().UTC().Format(time.RFC3339)
+	if err := r.Update(ctx, rev); err != nil {
+		return ctrl.Result{}, err
+	}
+	rev.Status = *status
 	rev.Status.Phase = v1.PhaseFailed
 	rev.Status.Message = msg
 	if err := r.Status().Update(ctx, rev); err != nil {
 		return ctrl.Result{}, err
 	}
+	retry := ctrl.Result{RequeueAfter: r.scheduleRetry(pkg, rev)}
 	countRevision(pkg.Name, outcomeFailed)
 	prev := lastGood(*revs, rev.Spec.Revision)
 	// The cluster no longer matches any earlier revision as recorded: part
@@ -459,20 +501,20 @@ func (r *PackageReconciler) fail(ctx context.Context, pkg *v1.Package, rev *v1.P
 	}
 	switch {
 	case !atomic(pkg):
-		setReady(pkg, metav1.ConditionFalse, v1.ReasonUpgradeFailed, msg+" (atomic upgrades are off)")
-		return ctrl.Result{}, nil
+		setReady(pkg, metav1.ConditionFalse, v1.ReasonUpgradeFailed, msg+" (atomic upgrades are off)"+retryNote(pkg))
+		return retry, nil
 	case prev == nil:
-		setReady(pkg, metav1.ConditionFalse, v1.ReasonUpgradeFailed, msg+" (no earlier revision to return to)")
-		return ctrl.Result{}, nil
+		setReady(pkg, metav1.ConditionFalse, v1.ReasonUpgradeFailed, msg+" (no earlier revision to return to)"+retryNote(pkg))
+		return retry, nil
 	case !d.rollbackSafe:
 		setReady(pkg, metav1.ConditionFalse, v1.ReasonUpgradeFailed,
-			fmt.Sprintf("%s (version %s does not declare rollback as safe; fix forward)", msg, d.version))
-		return ctrl.Result{}, nil
+			fmt.Sprintf("%s (version %s does not declare rollback as safe; fix forward)%s", msg, d.version, retryNote(pkg)))
+		return retry, nil
 	}
 
 	if err := r.restoreComponents(ctx, prev, applied); err != nil {
-		setReady(pkg, metav1.ConditionFalse, v1.ReasonUpgradeFailed, fmt.Sprintf("%s; rolling back failed too: %v", msg, err))
-		return ctrl.Result{}, nil
+		setReady(pkg, metav1.ConditionFalse, v1.ReasonUpgradeFailed, fmt.Sprintf("%s; rolling back failed too: %v%s", msg, err, retryNote(pkg)))
+		return retry, nil
 	}
 	restored, err := r.recordRestored(ctx, pkg, prev, d.digest, *revs, false, fmt.Sprintf("revision %d failed (%s), restored revision %d", rev.Spec.Revision, msg, prev.Spec.Revision))
 	if err != nil {
@@ -481,9 +523,9 @@ func (r *PackageReconciler) fail(ctx context.Context, pkg *v1.Package, rev *v1.P
 	*revs = append(*revs, *restored)
 	pkg.Status.CurrentRevision = restored.Spec.Revision
 	pkg.Status.Version = restored.Spec.Version
-	setReady(pkg, metav1.ConditionFalse, v1.ReasonUpgradeRolledBack, restored.Status.Message)
+	setReady(pkg, metav1.ConditionFalse, v1.ReasonUpgradeRolledBack, restored.Status.Message+retryNote(pkg))
 	countRevision(pkg.Name, outcomeRolledBack)
-	return ctrl.Result{}, nil
+	return retry, nil
 }
 
 // restoreComponents returns the given components to their state in prev,
