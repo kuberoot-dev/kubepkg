@@ -61,6 +61,10 @@ type Env struct {
 	Config  *rest.Config
 	Client  client.Client
 	Options *Options
+	// PlainHTTPRegistries are the registry hosts reached without TLS:
+	// Options.PlainHTTPRegistries and those every Repository lists. It
+	// changes while the operator runs.
+	PlainHTTPRegistries *source.Registries
 }
 
 // BackendFactory makes a backend and the preparer that puts charts where
@@ -106,7 +110,14 @@ type Options struct {
 	// Secrets with registry credentials, read on every pull and tried
 	// before RegistryConfig.
 	RegistrySecrets []string
-	PlainHTTP       bool
+	// PlainHTTPRegistries are registry hosts, host or host:port, reached
+	// without TLS; Repositories add their own. Every other registry keeps
+	// TLS.
+	PlainHTTPRegistries []string
+	// PlainHTTP reaches every registry without TLS. Deprecated: use
+	// PlainHTTPRegistries, which does not take public registries off TLS
+	// along with a local one.
+	PlainHTTP bool
 
 	MetricsAddr string
 	ProbeAddr   string
@@ -178,7 +189,8 @@ func (o *Options) BindFlags(fs *flag.FlagSet) {
 	fs.StringVar(&o.CacheDir, "cache-dir", o.CacheDir, "where package trees and charts are kept (helm backend)")
 	fs.StringVar(&o.RegistryConfig, "registry-config", o.RegistryConfig, "Docker config file with registry credentials")
 	fs.Var((*listFlag)(&o.RegistrySecrets), "registry-secret", "namespace/name of a dockerconfigjson Secret with registry credentials (repeatable)")
-	fs.BoolVar(&o.PlainHTTP, "plain-http", o.PlainHTTP, "talk to OCI registries without TLS (local test registries only)")
+	fs.Var((*listFlag)(&o.PlainHTTPRegistries), "plain-http-registry", "registry host[:port] to reach without TLS, e.g. a local registry (repeatable); others keep TLS")
+	fs.BoolVar(&o.PlainHTTP, "plain-http", o.PlainHTTP, "deprecated, use --plain-http-registry: talk to every OCI registry without TLS")
 	fs.StringVar(&o.MetricsAddr, "metrics-bind-address", o.MetricsAddr, "metrics endpoint")
 	fs.StringVar(&o.ProbeAddr, "health-probe-bind-address", o.ProbeAddr, "health probe endpoint")
 	fs.BoolVar(&o.LeaderElect, "leader-elect", o.LeaderElect, "enable leader election")
@@ -191,7 +203,7 @@ func (o *Options) BindFlags(fs *flag.FlagSet) {
 // registry settings.
 func (env Env) fetcher() *source.Fetcher {
 	o := env.Options
-	f := &source.Fetcher{CacheDir: o.CacheDir, PlainHTTP: o.PlainHTTP, CredentialsFile: o.RegistryConfig, Mirror: o.Mirror}
+	f := &source.Fetcher{CacheDir: o.CacheDir, PlainHTTP: o.PlainHTTP, PlainHTTPRegistries: env.PlainHTTPRegistries, CredentialsFile: o.RegistryConfig, Mirror: o.Mirror}
 	if len(o.RegistrySecrets) > 0 {
 		secrets := o.RegistrySecrets
 		cs, csErr := kubernetes.NewForConfig(env.Config)
@@ -228,7 +240,7 @@ func HelmBackend(env Env) (backend.Backend, controller.Preparer, error) {
 // FluxBackend installs through Flux: an OCIRepository or HelmRepository
 // and a HelmRelease per component.
 func FluxBackend(env Env) (backend.Backend, controller.Preparer, error) {
-	return &flux.Backend{Client: env.Client, Insecure: env.Options.PlainHTTP}, controller.ChartPreparer{Mirror: env.Options.Mirror}, nil
+	return &flux.Backend{Client: env.Client, Insecure: env.Options.PlainHTTP}, controller.ChartPreparer{Mirror: env.Options.Mirror, PlainHTTPRegistries: env.PlainHTTPRegistries}, nil
 }
 
 // WerfBackend installs through Nelm, werf's deployment engine, with charts
@@ -255,7 +267,7 @@ func ArgoBackend(env Env) (backend.Backend, controller.Preparer, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return &argo.Backend{Client: env.Client, Secrets: secrets, Namespace: env.Options.ArgoNamespace, Project: env.Options.ArgoProject}, controller.ChartPreparer{Mirror: env.Options.Mirror}, nil
+	return &argo.Backend{Client: env.Client, Secrets: secrets, Namespace: env.Options.ArgoNamespace, Project: env.Options.ArgoProject}, controller.ChartPreparer{Mirror: env.Options.Mirror, PlainHTTPRegistries: env.PlainHTTPRegistries}, nil
 }
 
 // Run starts the operator and blocks until ctx is done.
@@ -311,7 +323,16 @@ func Run(ctx context.Context, cfg *rest.Config, o *Options) error {
 	if err != nil {
 		return err
 	}
-	be, pre, err := factory(Env{Config: cfg, Client: mgr.GetClient(), Options: o})
+	for _, h := range o.PlainHTTPRegistries {
+		if err := source.CheckRegistryHost(h); err != nil {
+			return fmt.Errorf("--plain-http-registry: %w", err)
+		}
+	}
+	if o.PlainHTTP {
+		ctrl.Log.WithName("setup").Info("--plain-http is deprecated and takes every registry off TLS; use --plain-http-registry or the plainHTTPRegistries of a Repository")
+	}
+	plainHTTP := source.NewRegistries(o.PlainHTTPRegistries...)
+	be, pre, err := factory(Env{Config: cfg, Client: mgr.GetClient(), Options: o, PlainHTTPRegistries: plainHTTP})
 	if err != nil {
 		return fmt.Errorf("backend %s: %w", o.Backend, err)
 	}
@@ -319,7 +340,7 @@ func Run(ctx context.Context, cfg *rest.Config, o *Options) error {
 	if err != nil {
 		return err
 	}
-	repos := &controller.Repositories{Store: repo.NewStore(), Fetchers: o.IndexFetchers, Policy: o.Policy}
+	repos := &controller.Repositories{Store: repo.NewStore(), Fetchers: o.IndexFetchers, Policy: o.Policy, PlainHTTP: plainHTTP}
 	r := &controller.PackageReconciler{
 		Client:       mgr.GetClient(),
 		Profile:      o.Profile,

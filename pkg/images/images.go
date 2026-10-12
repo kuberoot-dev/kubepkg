@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -150,6 +151,9 @@ type Resolver struct {
 	CredentialsFile string
 	// PlainHTTP talks to registries without TLS (test registries only).
 	PlainHTTP bool
+	// PlainHTTPRegistries are registry hosts, host or host:port, reached
+	// without TLS; the others keep it.
+	PlainHTTPRegistries []string
 }
 
 // Pin returns ref with the digest its tag points at now; a reference that
@@ -184,7 +188,7 @@ func (r Resolver) Repository(name string) (*remote.Repository, error) {
 	if err != nil {
 		return nil, err
 	}
-	repo.PlainHTTP = r.PlainHTTP
+	repo.PlainHTTP = r.PlainHTTP || slices.Contains(r.PlainHTTPRegistries, repo.Reference.Registry)
 	client := &auth.Client{Client: retry.DefaultClient, Cache: auth.NewCache()}
 	if r.CredentialsFile != "" {
 		store, err := credentials.NewStore(r.CredentialsFile, credentials.StoreOptions{})

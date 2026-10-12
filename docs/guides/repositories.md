@@ -232,6 +232,27 @@ helm upgrade kubepkg oci://ghcr.io/kuberoot-dev/charts/kubepkg -n kubepkg-system
 
 The operator reads the Secrets on every pull, so rotated credentials apply without a restart. A Secret that does not exist means no credentials: the operator logs a warning once and pulls anonymously until it appears. A distribution can therefore set `registrySecrets` by default and leave creating the Secret to the users who need it. Each registry gets the entry for its host, and one Secret can hold several. An operator that runs outside the cluster can use a Docker config file instead, with `--registry-config`; the Secrets are tried first. This applies to OCI registries with the helm and werf backends. Flux and Argo CD pull charts themselves, with their own credentials.
 
+## Registries without TLS
+
+A registry in the cluster or on a lab network often speaks plain HTTP. Name it, and only it, so every other registry keeps TLS:
+
+```yaml
+apiVersion: kubepkg.dev/v1
+kind: Repository
+metadata:
+  name: lab
+spec:
+  url: http://registry.lab:8080/index.yaml
+  publicKeys: ["..."]
+  plainHTTPRegistries: ["registry.lab:5000"]   # host or host:port
+```
+
+`kubepkg repo add lab <url> --plain-http-registry registry.lab:5000` writes the same. A registry either speaks TLS or does not, so a host listed by any Repository is reached without TLS for every chart and package tree on it, while ghcr.io and the rest stay on TLS. Registries that no Repository lists, such as a mirror, go in the operator's `--plain-http-registry` flag (chart value `plainHTTPRegistries`). The index URL is fetched with the scheme it names. With the flux backend, the OCIRepository of a chart on such a registry is marked `insecure`; the argo backend leaves registry access to Argo CD's own repository settings.
+
+The CLI commands that read registries take `--plain-http-registry` as well (`build` for its sources, `repo index`, `bundle create`, `init`, `validate`, `images`).
+
+The operator flag `--plain-http` and the chart value `plainHTTP` take every registry off TLS, public ones included. They still work and are deprecated: use the per-registry settings instead.
+
 ## Mirrors and air-gapped clusters
 
 An index pins charts at the registry they were built into, and the operator fetches them from there. To serve clusters that cannot reach that registry, build the same recipes into your own registry and publish your own index, signed by your own keys:

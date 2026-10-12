@@ -95,7 +95,7 @@ helm install kubepkg oci://registry.internal/kubepkg/ghcr.io/kuberoot-dev/charts
   -n kubepkg-system --create-namespace -f values.yaml
 ```
 
-With `mirror` set, the operator fetches every chart and package tree from the mirror and from nowhere else. Package specs keep their original locations, so revisions do not change when you turn the mirror on. The cluster checks the index served from your web server with the same keys, and checks every chart against its pinned digest.
+With `mirror` set, the operator fetches every chart and package tree from the mirror and from nowhere else. A mirror without TLS goes in `plainHTTPRegistries` (host or host:port). Package specs keep their original locations, so revisions do not change when you turn the mirror on. The cluster checks the index served from your web server with the same keys, and checks every chart against its pinned digest.
 
 kubepkg's own chart and operator image are artifacts like any other. Copy them into the mirror once, with `oras cp` or your registry's replication, or add them to the bundle from a repository that packages kubepkg itself.
 

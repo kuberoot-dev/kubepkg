@@ -55,6 +55,9 @@ spec:
             {{- with .Values.mirror }}
             - --mirror={{ . }}
             {{- end }}
+            {{- range .Values.plainHTTPRegistries }}
+            - --plain-http-registry={{ . }}
+            {{- end }}
             {{- if .Values.plainHTTP }}
             - --plain-http
             {{- end }}

@@ -54,7 +54,12 @@ imagePolicy: "off"
 # alone too.
 imagePolicyExclude: [kube-system, kube-public, kube-node-lease]
 
-# Let the operator pull from registries over plain HTTP (test registries only).
+# Registries the operator reaches over plain HTTP, host or host:port, e.g.
+# a local registry; every other registry keeps TLS. A Repository can list
+# more in spec.plainHTTPRegistries.
+plainHTTPRegistries: []
+# Deprecated: reaches every registry over plain HTTP, public ones included.
+# Use plainHTTPRegistries.
 plainHTTP: false
 
 # Repositories to subscribe to, e.g. a distribution's own:

@@ -63,6 +63,10 @@ type Fetcher struct {
 	// to every registry, or only to PlainHTTPHosts when that is set.
 	PlainHTTP      bool
 	PlainHTTPHosts []string
+	// PlainHTTPRegistries are registry hosts reached without TLS whatever
+	// PlainHTTP says, so a local registry does not take every other
+	// registry off TLS with it. The set may change while it is in use.
+	PlainHTTPRegistries *Registries
 	// CredentialsFile is a Docker config with registry credentials; empty
 	// means anonymous access.
 	CredentialsFile string
@@ -251,6 +255,9 @@ func untar(r io.Reader, dst string) error {
 
 // plainHTTP says whether to reach host without TLS.
 func (f *Fetcher) plainHTTP(host string) bool {
+	if f.PlainHTTPRegistries.Has(host) {
+		return true
+	}
 	if !f.PlainHTTP {
 		return false
 	}

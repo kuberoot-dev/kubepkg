@@ -97,7 +97,7 @@ docker stop "${REG_NAME}" >/dev/null
 python3 -m http.server 5005 --bind 127.0.0.1 --directory "${WORK}/site" >/dev/null 2>&1 &
 WWW_PID=$!
 for ((i = 0; i < 20; i++)); do curl -sf http://127.0.0.1:5005/main/index.yaml >/dev/null && break; sleep 0.5; done
-start_operator --mirror "oci://${MIRROR}/mirror"
+start_operator --mirror "oci://${MIRROR}/mirror" --plain-http-registry "${MIRROR}"
 "${KP[@]}" --context "${KCTX}" repo add main http://127.0.0.1:5005/main/index.yaml --public-key "${WORK}/signing.pub" >/dev/null
 sleep 5
 "${KP[@]}" --context "${KCTX}" install web --yes >/dev/null

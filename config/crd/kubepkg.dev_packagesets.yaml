@@ -217,6 +217,18 @@ spec:
                         interval:
                           description: Interval between index refreshes. Default 10m.
                           type: string
+                        plainHTTPRegistries:
+                          description: |-
+                            PlainHTTPRegistries are OCI registries, host or host:port, that the
+                            charts and package trees of this repository are fetched from without
+                            TLS, such as a registry in the cluster. Every other registry keeps
+                            TLS. A registry either speaks TLS or does not, so a host listed here
+                            is reached without TLS for whatever package lives on it. The index
+                            URL itself is fetched with the scheme it names.
+                          items:
+                            pattern: ^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.-]+)(:[0-9]+)?$
+                            type: string
+                          type: array
                         priority:
                           description: |-
                             Priority orders repositories that carry the same package: the
@@ -651,6 +663,18 @@ spec:
                         interval:
                           description: Interval between index refreshes. Default 10m.
                           type: string
+                        plainHTTPRegistries:
+                          description: |-
+                            PlainHTTPRegistries are OCI registries, host or host:port, that the
+                            charts and package trees of this repository are fetched from without
+                            TLS, such as a registry in the cluster. Every other registry keeps
+                            TLS. A registry either speaks TLS or does not, so a host listed here
+                            is reached without TLS for whatever package lives on it. The index
+                            URL itself is fetched with the scheme it names.
+                          items:
+                            pattern: ^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.-]+)(:[0-9]+)?$
+                            type: string
+                          type: array
                         priority:
                           description: |-
                             Priority orders repositories that carry the same package: the
@@ -1085,6 +1109,18 @@ spec:
                         interval:
                           description: Interval between index refreshes. Default 10m.
                           type: string
+                        plainHTTPRegistries:
+                          description: |-
+                            PlainHTTPRegistries are OCI registries, host or host:port, that the
+                            charts and package trees of this repository are fetched from without
+                            TLS, such as a registry in the cluster. Every other registry keeps
+                            TLS. A registry either speaks TLS or does not, so a host listed here
+                            is reached without TLS for whatever package lives on it. The index
+                            URL itself is fetched with the scheme it names.
+                          items:
+                            pattern: ^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.-]+)(:[0-9]+)?$
+                            type: string
+                          type: array
                         priority:
                           description: |-
                             Priority orders repositories that carry the same package: the

@@ -119,6 +119,8 @@ type ChartPreparer struct {
 	// Mirror, when set, is the registry the tool fetches every chart from
 	// (see source.MirrorPath).
 	Mirror string
+	// PlainHTTPRegistries are registry hosts the tool reaches without TLS.
+	PlainHTTPRegistries *source.Registries
 }
 
 // Prepare implements Preparer.
@@ -130,7 +132,8 @@ func (p ChartPreparer) Prepare(_ context.Context, src *v1.PackageSource, _ *v1.V
 	// The digest below stays that of the published location, so turning a
 	// mirror on does not make new revisions.
 	m := source.MirrorChart(p.Mirror, source.Chart{Repository: ch.Repository, Name: ch.Name, Version: ch.Version, Digest: ch.Digest})
-	c.Chart = &backend.Chart{Repository: m.Repository, Name: ch.Name, Version: ch.Version, Digest: ch.Digest}
+	c.Chart = &backend.Chart{Repository: m.Repository, Name: ch.Name, Version: ch.Version, Digest: ch.Digest,
+		PlainHTTP: strings.HasPrefix(m.Repository, "oci://") && p.PlainHTTPRegistries.HasRef(m.Repository)}
 	if ch.Digest != "" {
 		return ch.Digest, nil
 	}

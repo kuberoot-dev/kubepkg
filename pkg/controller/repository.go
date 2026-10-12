@@ -40,6 +40,7 @@ import (
 
 	"github.com/kuberoot-dev/kubepkg/api/v1"
 	"github.com/kuberoot-dev/kubepkg/pkg/repo"
+	"github.com/kuberoot-dev/kubepkg/pkg/source"
 )
 
 const (
@@ -60,6 +61,9 @@ type Repositories struct {
 	Store    *repo.Store
 	Fetchers repo.Fetchers
 	Policy   repo.Policy
+	// PlainHTTP collects the plainHTTPRegistries of every Repository, for
+	// the fetchers of charts and package trees; nil ignores them.
+	PlainHTTP *source.Registries
 }
 
 // RepositoryReconciler keeps the index of every Repository loaded.
@@ -74,11 +78,15 @@ func (r *RepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := r.Get(ctx, req.NamespacedName, rp); err != nil {
 		if apierrors.IsNotFound(err) {
 			r.Repositories.Store.Delete(req.Name)
+			r.plainHTTP(req.Name, nil)
 			forgetRepository(req.Name)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
+	// The packages already installed from it may need these to update,
+	// whatever happens to the index.
+	r.plainHTTP(rp.Name, rp.Spec.PlainHTTPRegistries)
 	interval := defaultRepositoryInterval
 	if rp.Spec.Interval != nil && rp.Spec.Interval.Duration > 0 {
 		interval = rp.Spec.Interval.Duration
@@ -111,6 +119,12 @@ func (r *RepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: interval}, nil
+}
+
+func (r *RepositoryReconciler) plainHTTP(name string, hosts []string) {
+	if r.Repositories.PlainHTTP != nil {
+		r.Repositories.PlainHTTP.Set("repository/"+name, hosts)
+	}
 }
 
 func (r *RepositoryReconciler) load(ctx context.Context, rp *v1.Repository) (*repo.Index, string, string, error) {
