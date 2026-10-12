@@ -150,9 +150,9 @@ A package is blocked, with condition `Ready=False`, when:
 |---|---|
 | `VersionMismatch` | the PackageSource version does not satisfy `Package.spec.version` |
 | `RequirementsNotMet` | a requirement is missing or not Ready; the message names it |
+| `ConflictingRequirements` | packages that require this one ask for different variants of it or pass different values for the same key |
 | `Conflict` | an installed package matches an entry in `conflicts`, in either direction |
 | `CRDOwnershipConflict` | a CRD in `crds` is owned by another package |
-| `ConflictingRequirements` | packages that require this one ask for different variants of it or pass different values for the same key |
 | `UpgradeFailed` | the latest revision failed and was not rolled back |
 | `UpgradeRolledBack` | the latest revision failed and the package was rolled back to the previous one |
 
