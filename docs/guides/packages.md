@@ -116,6 +116,8 @@ kubectl annotate package cert-manager kubepkg.dev/retry="$(date +%s)" --overwrit
 
 Every try is a revision, so `kubepkg history` shows each of them; while a change keeps failing, older revisions are pruned down to `revisionHistoryLimit`, never the one a failed upgrade returns to. The operator flags `--retry-backoff` and `--retry-backoff-max` (chart values `retry.backoff` and `retry.maxBackoff`) change the waits. A rollback you asked for is not undone by retries: it holds until the Package changes.
 
+A package whose charts cannot be fetched, for example while a registry is down, reports `InvalidConfiguration` and is looked at again the same way: after 30 seconds at first, then after waits that grow with how long it has been failing, at most 10 minutes.
+
 ## Rolling back by hand
 
 ```bash

@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/kuberoot-dev/kubepkg/api/v1"
@@ -39,6 +40,9 @@ const (
 	// AnnotationFailedAt on a failed revision records when it failed, the
 	// time the wait before the next try starts from.
 	AnnotationFailedAt = "kubepkg.dev/failed-at"
+	// ReasonInvalidConfiguration: the desired state could not be worked
+	// out, e.g. a chart could not be fetched or components form a cycle.
+	ReasonInvalidConfiguration = "InvalidConfiguration"
 )
 
 func (r *PackageReconciler) clock() time.Time {
@@ -107,6 +111,19 @@ func failedAt(rev *v1.PackageRevision) time.Time {
 		return t
 	}
 	return rev.CreationTimestamp.Time
+}
+
+// preparationRetry is when to look again at a package whose desired state
+// could not be worked out, typically because a chart could not be
+// fetched: no revision records those tries, so the wait grows with how
+// long the package has been failing, from the backoff up to its maximum.
+func (r *PackageReconciler) preparationRetry(pkg *v1.Package) time.Duration {
+	c := meta.FindStatusCondition(pkg.Status.Conditions, "Ready")
+	if c == nil || c.Reason != ReasonInvalidConfiguration {
+		return 0
+	}
+	base, ceiling := r.backoff(1), r.backoff(1<<20)
+	return min(max(r.clock().Sub(c.LastTransitionTime.Time), base), ceiling)
 }
 
 // retryNote tells how a failed change is tried again.

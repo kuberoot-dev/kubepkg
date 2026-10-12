@@ -105,6 +105,9 @@ func (r *PackageReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	pkg.Status.Retry = nil // set again while a failed change waits
 	res, err := r.reconcile(ctx, pkg)
+	if err == nil && res.IsZero() {
+		res.RequeueAfter = r.preparationRetry(pkg)
+	}
 	recordPackage(pkg)
 	if uerr := r.Status().Update(ctx, pkg); uerr != nil {
 		if apierrors.IsConflict(uerr) {

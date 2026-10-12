@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/kuberoot-dev/kubepkg/api/v1"
+	"github.com/kuberoot-dev/kubepkg/pkg/backend"
 )
 
 // clockAt makes the reconciler's clock a variable the test moves.
@@ -220,5 +222,40 @@ func TestRequestedRollbackIsNotRetried(t *testing.T) {
 	}
 	if e.pkg("app").Status.Retry != nil {
 		t.Fatal("a requested rollback reports a retry")
+	}
+}
+
+// failingPreparer cannot fetch any chart, like a registry that is down.
+type failingPreparer struct{}
+
+func (failingPreparer) Prepare(context.Context, *v1.PackageSource, *v1.Variant, *v1.Component, *backend.Component) (string, error) {
+	return "", errors.New("registry unreachable")
+}
+
+func TestAChartThatCannotBeFetchedIsTriedAgain(t *testing.T) {
+	e := newEnv(t)
+	now := e.clockAt(time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC))
+	e.r.Preparer = failingPreparer{}
+	e.create(mkSource("app", "1.0.0", true, "app"), &v1.Package{ObjectMeta: metav1.ObjectMeta{Name: "app"}})
+	if res := e.reconcile("app"); res.RequeueAfter < 30*time.Second {
+		t.Fatalf("requeue after %s, want at least the backoff", res.RequeueAfter)
+	}
+	if _, reason, _ := ready(e.pkg("app")); reason != ReasonInvalidConfiguration {
+		t.Fatalf("reason = %s", reason)
+	}
+	// The longer it fails, the longer the wait, never more than the cap.
+	c := e.pkg("app").Status.Conditions[0].LastTransitionTime.Time
+	*now = c.Add(3 * time.Minute)
+	if res := e.reconcile("app"); res.RequeueAfter != 3*time.Minute {
+		t.Fatalf("requeue after %s, want 3m", res.RequeueAfter)
+	}
+	*now = c.Add(5 * time.Hour)
+	if res := e.reconcile("app"); res.RequeueAfter != 10*time.Minute {
+		t.Fatalf("requeue after %s, want the cap", res.RequeueAfter)
+	}
+	e.r.Preparer = fakePreparer{}
+	e.reconcile("app")
+	if ok, reason, msg := ready(e.pkg("app")); !ok {
+		t.Fatalf("not ready once the chart can be fetched: %s %s", reason, msg)
 	}
 }
