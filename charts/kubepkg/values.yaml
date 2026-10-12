@@ -79,6 +79,12 @@ replicas: 1
 # not keep the others, its dependents included, waiting.
 packageWorkers: 4
 
+# A failed install or upgrade is tried again on its own: first after
+# backoff, then after twice as long each time, at most maxBackoff.
+retry:
+  backoff: 30s
+  maxBackoff: 10m
+
 metrics:
   # A Service in front of the operator's metrics endpoint.
   service: true

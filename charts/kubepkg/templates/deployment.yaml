@@ -28,6 +28,14 @@ spec:
             - --api-group={{ .Values.apiGroup }}
             - --leader-elect=true
             - --package-workers={{ .Values.packageWorkers | default 4 }}
+            {{- with .Values.retry }}
+            {{- with .backoff }}
+            - --retry-backoff={{ . }}
+            {{- end }}
+            {{- with .maxBackoff }}
+            - --retry-backoff-max={{ . }}
+            {{- end }}
+            {{- end }}
             - --cache-dir=/var/cache/kubepkg
             - --metrics-bind-address=:8080
             - --health-probe-bind-address=:8081

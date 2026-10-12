@@ -30,6 +30,7 @@ import (
 	ctradmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 	"sort"
 	"strings"
+	"time"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -112,6 +113,11 @@ type Options struct {
 	LeaderElect bool
 	// PackageWorkers is how many packages are reconciled at once.
 	PackageWorkers int
+	// RetryBackoff is how long a change that failed waits before it is
+	// tried again; each further failure doubles the wait, up to
+	// RetryBackoffMax.
+	RetryBackoff    time.Duration
+	RetryBackoffMax time.Duration
 	// LeaderElectionID defaults to <binary>.<group>.
 	LeaderElectionID string
 }
@@ -120,17 +126,19 @@ type Options struct {
 // backends.
 func DefaultOptions() *Options {
 	return &Options{
-		Profile:        controller.DefaultProfile(),
-		Backend:        "helm",
-		Backends:       map[string]BackendFactory{"helm": HelmBackend, "flux": FluxBackend, "argo": ArgoBackend, "werf": WerfBackend},
-		AddToScheme:    []func(*runtime.Scheme) error{helmv2.AddToScheme},
-		IndexFetchers:  repo.DefaultFetchers(),
-		Policy:         repo.AllowAll{},
-		CacheDir:       filepath.Join(os.TempDir(), "kubepkg"),
-		NelmBinary:     "nelm",
-		PackageWorkers: 4,
-		WebhookPort:    9443,
-		WebhookService: "kubepkg-webhook", WebhookSecret: "kubepkg-webhook-tls", WebhookConfig: "kubepkg-images",
+		Profile:         controller.DefaultProfile(),
+		Backend:         "helm",
+		Backends:        map[string]BackendFactory{"helm": HelmBackend, "flux": FluxBackend, "argo": ArgoBackend, "werf": WerfBackend},
+		AddToScheme:     []func(*runtime.Scheme) error{helmv2.AddToScheme},
+		IndexFetchers:   repo.DefaultFetchers(),
+		Policy:          repo.AllowAll{},
+		CacheDir:        filepath.Join(os.TempDir(), "kubepkg"),
+		NelmBinary:      "nelm",
+		PackageWorkers:  4,
+		RetryBackoff:    controller.DefaultRetryBackoff,
+		RetryBackoffMax: controller.DefaultRetryBackoffMax,
+		WebhookPort:     9443,
+		WebhookService:  "kubepkg-webhook", WebhookSecret: "kubepkg-webhook-tls", WebhookConfig: "kubepkg-images",
 		MetricsAddr: ":8080",
 		ProbeAddr:   ":8081",
 	}
@@ -175,6 +183,8 @@ func (o *Options) BindFlags(fs *flag.FlagSet) {
 	fs.StringVar(&o.ProbeAddr, "health-probe-bind-address", o.ProbeAddr, "health probe endpoint")
 	fs.BoolVar(&o.LeaderElect, "leader-elect", o.LeaderElect, "enable leader election")
 	fs.IntVar(&o.PackageWorkers, "package-workers", o.PackageWorkers, "packages reconciled at once; an install that waits for readiness holds one")
+	fs.DurationVar(&o.RetryBackoff, "retry-backoff", o.RetryBackoff, "wait before a failed install or upgrade is tried again; doubled after every further failure")
+	fs.DurationVar(&o.RetryBackoffMax, "retry-backoff-max", o.RetryBackoffMax, "longest wait between tries of a failed install or upgrade")
 }
 
 // fetcher downloads charts and package trees with the operator's
@@ -319,6 +329,9 @@ func Run(ctx context.Context, cfg *rest.Config, o *Options) error {
 		CRDs:         &controller.MetadataCRDs{Client: mgr.GetClient()},
 		Repositories: repos,
 		Workers:      o.PackageWorkers,
+
+		RetryBackoff:    o.RetryBackoff,
+		RetryBackoffMax: o.RetryBackoffMax,
 	}
 	if err := r.SetupWithManager(mgr); err != nil {
 		return err

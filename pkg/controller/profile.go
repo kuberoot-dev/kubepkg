@@ -58,7 +58,8 @@ const (
 	// unrelated objects.
 	AnnotationAdopt = "kubepkg.dev/adopt"
 	// AnnotationRetry changes the desired state without changing the spec,
-	// so a failed revision is attempted again.
+	// so a failed revision is attempted again at once instead of after
+	// its wait.
 	AnnotationRetry = "kubepkg.dev/retry"
 	// AnnotationDesiredDigest on a revision records the desired state it was
 	// made from; while it matches, the operator does not act again.

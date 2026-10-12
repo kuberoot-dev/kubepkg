@@ -152,8 +152,8 @@ A package is blocked, with condition `Ready=False`, when:
 | `RequirementsNotMet` | a requirement is missing or not Ready; the message names it |
 | `Conflict` | an installed package matches an entry in `conflicts`, in either direction |
 | `CRDOwnershipConflict` | a CRD in `crds` is owned by another package |
-| `UpgradeFailed` | the latest revision failed and was not rolled back |
-| `UpgradeRolledBack` | the latest revision failed and the package was rolled back to the previous one |
+| `UpgradeFailed` | the latest revision failed and was not rolled back; it is retried with backoff |
+| `UpgradeRolledBack` | the latest revision failed and the package was rolled back to the previous one; it is retried with backoff |
 
 ## Applying a revision
 
@@ -164,6 +164,7 @@ The operator builds the desired state from Package and PackageSource. If it diff
 3. If every component is healthy, revision N+1 is `Applied` and N becomes `Superseded`.
 4. If a component fails and `upgrade.atomic` is true and revision N is marked `rollbackSafe`, every component already changed is rolled back to the backend revision recorded in N, in reverse order. N+1 becomes `Failed`, a revision N+2 recording the restored state is added, and the package reports `UpgradeRolledBack`.
 5. If the rollback is not safe, the operator stops, N+1 stays `Failed`, and the package reports `UpgradeFailed`. Recovery is a forward fix.
+6. A failed revision is tried again as a new revision with the same desired state, after a wait that starts at `--retry-backoff` (30s) and doubles with every failure up to `--retry-backoff-max` (10m). `status.retry` counts the attempts and says when the next one is due. A change of the desired state (the Package, its PackageSource, or the `kubepkg.dev/retry` annotation) is applied at once and starts counting again. A rollback someone asked for is never retried.
 
 `rollbackSafe` is taken from the version being rolled back from: the author of 1.17 knows whether going back to 1.16 is safe after 1.17 ran its migrations.
 
@@ -358,6 +359,7 @@ The operator keeps every index loaded. A `Package` with no hand-written `Package
 - A hand-written `PackageSource` always wins, which is how a cluster overrides a package locally.
 - Selection waits until every repository has been fetched once, so after a restart a low priority index that loads first cannot win for a moment.
 - A failed refresh keeps the index loaded before; a repository that never loaded leaves its packages at `VersionNotAvailable`.
+- The index is fetched every `interval` (default 10m), a minute after a failure, and when the Repository's spec or annotations change. Fetches are conditional (`ETag`), and only an accepted index with another digest makes packages select again.
 - Requirements are not installed automatically: a package whose requirements are missing reports `RequirementsNotMet`. Installing a package together with what it needs is the CLI's job, so the cluster state stays explicit.
 
 A distribution adds index transports by URL scheme (`http` and `https` are built in) and a policy that admits indexes and versions — signature checks, allowed registries — through `operator.Options`.

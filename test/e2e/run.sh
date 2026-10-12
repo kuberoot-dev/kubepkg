@@ -3,8 +3,9 @@
 #
 # Scenario: install a two-component package, upgrade it, break an upgrade
 # (an image that does not exist) and check the whole package rolls back,
-# confirm the operator does not retry the same failure, fix forward, install
-# a package that depends on it, roll back by request, then delete.
+# confirm the operator retries the failure on its own after a wait, fix
+# forward, install a package that depends on it, roll back by request, then
+# delete.
 #
 # Needs docker, kind, kubectl, helm and go. Leaves nothing behind unless KEEP=1.
 set -euo pipefail
@@ -68,7 +69,7 @@ tree v2-broken registry.k8s.io/pause:does-not-exist-e2e
 tree v3 registry.k8s.io/pause:3.9
 
 # BACKEND picks the installer: helm (default) or werf (needs nelm on PATH).
-start_operator --backend "${BACKEND:-helm}" --values-secret kubepkg-system/platform-values --namespace-label e2e.kubepkg.dev/managed=true
+start_operator --backend "${BACKEND:-helm}" --retry-backoff 20s --values-secret kubepkg-system/platform-values --namespace-label e2e.kubepkg.dev/managed=true
 
 step "1. install demo 1.0.0"
 demo_source 1.0.0 v1
@@ -93,9 +94,19 @@ wait_reason demo UpgradeRolledBack 300
 echo "  revisions: $(revisions demo)"
 [[ "$(revisions demo)" == "1:1.0.0:Superseded 2:1.1.0:Failed 3:1.0.0:Applied " ]] || fail "unexpected revisions"
 
-step "3. the failure is not retried while nothing changes"
-sleep 20
-[[ "$(revisions demo)" == "1:1.0.0:Superseded 2:1.1.0:Failed 3:1.0.0:Applied " ]] || fail "operator retried a held package: $(revisions demo)"
+step "3. the failure is retried on its own, after a wait"
+retry_attempts() { ${K} get packages.kubepkg.dev demo -o jsonpath='{.status.retry.attempts}'; }
+[[ "$(retry_attempts)" == 1 ]] || fail "no retry scheduled: $(${K} get packages.kubepkg.dev demo -o jsonpath='{.status}')"
+[[ -n "$(${K} get packages.kubepkg.dev demo -o jsonpath='{.status.retry.nextAttempt}')" ]] || fail "no time for the next attempt"
+sleep 5
+[[ "$(revisions demo)" == "1:1.0.0:Superseded 2:1.1.0:Failed 3:1.0.0:Applied " ]] || fail "retried before the wait was over: $(revisions demo)"
+for ((i = 0; i < 300; i += 3)); do
+  [[ "$(retry_attempts)" == 2 ]] && break
+  sleep 3
+done
+[[ "$(retry_attempts)" == 2 ]] || fail "the failure was not tried again: $(revisions demo)"
+echo "  revisions: $(revisions demo)"
+[[ "$(revisions demo)" == "1:1.0.0:Superseded 2:1.1.0:Failed 3:1.0.0:Superseded 4:1.1.0:Failed 5:1.0.0:Applied " ]] || fail "unexpected revisions after the retry"
 
 step "4. fix forward to 1.2.0"
 # An operator-like field manager takes over a field the chart sets; the
@@ -159,8 +170,8 @@ wait_reason demo RolledBack
 echo "  revisions: $(revisions demo)"
 
 step "7. the CLI reports packages and history"
-"${ROOT}/bin/kubepkg" --context "${KCTX}" list | grep -Eq '^demo +1\.0\.0 +5 ' || fail "list does not show demo 1.0.0 at revision 5"
-"${ROOT}/bin/kubepkg" --context "${KCTX}" history demo | grep -Eq '^5 +1\.0\.0 +Applied .*restored from 1' || fail "history does not show the restore"
+"${ROOT}/bin/kubepkg" --context "${KCTX}" list | grep -Eq '^demo +1\.0\.0 +7 ' || fail "list does not show demo 1.0.0 at revision 7"
+"${ROOT}/bin/kubepkg" --context "${KCTX}" history demo | grep -Eq '^7 +1\.0\.0 +Applied .*restored from 1' || fail "history does not show the restore"
 
 step "8. a package made of a published chart, with no package tree"
 mkdir -p "${WORK}/hello/templates"
