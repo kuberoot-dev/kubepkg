@@ -57,7 +57,7 @@ type RenderOptions struct {
 // dependsOn, Argo CD Applications with sync waves, or a helmfile with
 // needs. Requirements on APIs no package provides are assumed served.
 func Render(ctx context.Context, store *repo.Store, policy repo.Policy, reqs []resolve.Request, o RenderOptions) ([]byte, error) {
-	chosen, order, providers, err := resolveFresh(ctx, store, policy, reqs, o.Variant)
+	chosen, order, providers, passed, err := resolveFresh(ctx, store, policy, reqs, o.Variant)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func Render(ctx context.Context, store *repo.Store, policy repo.Policy, reqs []r
 		if err != nil {
 			return nil, err
 		}
-		pc, err := renderComponents(name, spec, o.Variant, requiredPackages(chosen[name], providers), releases)
+		pc, err := renderComponents(name, spec, chosen[name].VariantName(), requiredPackages(chosen[name], providers), releases, passed[name])
 		if err != nil {
 			return nil, err
 		}
@@ -137,26 +137,35 @@ func Render(ctx context.Context, store *repo.Store, policy repo.Policy, reqs []r
 // package provides: without a cluster to ask, they are taken as served.
 // resolveFresh resolves the requested packages and their requirements as
 // install would for an empty cluster, and orders them.
-func resolveFresh(ctx context.Context, store *repo.Store, policy repo.Policy, reqs []resolve.Request, variant string) (map[string]resolve.Release, []string, map[string]string, error) {
+// Each release is in the variant the plan chose for it, and passed holds
+// the values the packages requiring one pass to its components.
+func resolveFresh(ctx context.Context, store *repo.Store, policy repo.Policy, reqs []resolve.Request, variant string) (map[string]resolve.Release, []string, map[string]string, map[string]map[string]map[string]any, error) {
 	cat := store.Catalog(ctx, variant, policy)
 	st := resolve.State{Packages: map[string]resolve.Installed{}, APIs: assumedAPIs(cat)}
 	p, err := resolve.Resolve(cat, st, reqs)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	chosen := map[string]resolve.Release{}
+	passed := map[string]map[string]map[string]any{}
 	for _, ch := range p.Changes {
 		for _, r := range cat[ch.Name] {
 			if r.Version == ch.To {
+				if vr, ok := r.Variants[ch.Variant]; ok && ch.Variant != r.VariantName() {
+					r.Requires, r.Variant = vr, ch.Variant
+				}
 				chosen[ch.Name] = r
 			}
+		}
+		if len(ch.Passed.Values) > 0 {
+			passed[ch.Name] = ch.Passed.Values
 		}
 	}
 	order, providers, err := packageOrder(chosen)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	return chosen, order, providers, nil
+	return chosen, order, providers, passed, nil
 }
 
 func assumedAPIs(cat resolve.Catalog) map[string]bool {
@@ -260,7 +269,7 @@ func admittedVersion(ctx context.Context, store *repo.Store, policy repo.Policy,
 // renderComponents describes a package's components the way the operator
 // would hand them to a backend, in apply order, and records its releases
 // for the packages that require it.
-func renderComponents(name string, spec *v1.PackageSourceSpec, variant string, deps []string, releases map[string][]string) ([]backend.Component, error) {
+func renderComponents(name string, spec *v1.PackageSourceSpec, variant string, deps []string, releases map[string][]string, passed map[string]map[string]any) ([]backend.Component, error) {
 	if variant == "" {
 		variant = "default"
 	}
@@ -306,6 +315,7 @@ func renderComponents(name string, spec *v1.PackageSourceSpec, variant string, d
 			WaitStrategy:     c.Install.WaitStrategy,
 			HealthCheckExprs: controller.FluxHealthChecks(c.Install.HealthCheckExprs),
 			Timeout:          10 * time.Minute,
+			Values:           passed[c.Name],
 		}
 		for _, d := range c.Install.DependsOn {
 			bc.DependsOn = append(bc.DependsOn, byName[d].Install.Namespace+"/"+controller.ReleaseName(byName[d]))

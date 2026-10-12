@@ -46,14 +46,25 @@ type Requirement struct {
 	Capability string
 	Version    string
 	Optional   bool
+	// Variant is the variant of the required package asked for.
+	Variant string
+	// Values are passed to the required package's components, by
+	// component name.
+	Values map[string]map[string]any
+	// Invalid says why values given for the requirement cannot be read.
+	Invalid string
 }
 
 func (r Requirement) String() string {
 	if r.Package != "" {
+		s := "package " + r.Package
 		if r.Version != "" {
-			return fmt.Sprintf("package %s %s", r.Package, r.Version)
+			s += " " + r.Version
 		}
-		return "package " + r.Package
+		if r.Variant != "" {
+			s += " (variant " + r.Variant + ")"
+		}
+		return s
 	}
 	return "capability " + r.Capability
 }
@@ -65,12 +76,45 @@ type Release struct {
 	Provides  []string
 	Requires  []Requirement
 	Conflicts []string
+	// Variant is the variant Requires belongs to; empty means default.
+	Variant string
+	// Variants holds the requirements of every variant, so a package can
+	// be resolved in a variant that a package requiring it asks for.
+	Variants map[string][]Requirement
+}
+
+// VariantName is the variant a release is resolved in.
+func (r Release) VariantName() string {
+	if r.Variant == "" {
+		return "default"
+	}
+	return r.Variant
+}
+
+// inVariant returns the release resolved in another variant, or false
+// when it has no such variant.
+func (r Release) inVariant(v string) (Release, bool) {
+	if v == "" || v == r.VariantName() {
+		return r, true
+	}
+	reqs, ok := r.Variants[v]
+	if !ok {
+		return r, false
+	}
+	r.Requires, r.Variant = reqs, v
+	return r, true
 }
 
 // Installed is a package present in the cluster.
 type Installed struct {
 	Release
 	Ready bool
+	// VariantSet is true when the Package names its variant, so the
+	// variant is a choice the plan must not change.
+	VariantSet bool
+	// Leaving is true for a package being deleted: what it passes to the
+	// packages it requires no longer counts.
+	Leaving bool
 }
 
 // State is what the cluster has: installed packages and served APIs.
@@ -135,6 +179,10 @@ func Check(reqs []Requirement, st State) ([]Unmet, error) {
 				if !r.Optional {
 					out = append(out, Unmet{r, "not installed"})
 				}
+				continue
+			}
+			if r.Variant != "" && r.Variant != p.VariantName() {
+				out = append(out, Unmet{r, fmt.Sprintf("runs variant %s, variant %s is needed", p.VariantName(), r.Variant)})
 				continue
 			}
 			if !p.Ready {

@@ -216,18 +216,25 @@ func releaseName(c v1.Component) string {
 // buildDesired computes the desired state of a package. depReleases maps a
 // package this one depends on to its releases (namespace/name), for the flux
 // backend's dependsOn.
-func (r *PackageReconciler) buildDesired(ctx context.Context, pkg *v1.Package, src *v1.PackageSource, v *v1.Variant, depReleases []string) (*desiredState, error) {
+//
+// passed are the values the packages requiring this one pass to its
+// components: over the package's defaults and the platform values, under
+// the Package's own values.
+func (r *PackageReconciler) buildDesired(ctx context.Context, pkg *v1.Package, src *v1.PackageSource, v *v1.Variant, depReleases []string, passed map[string]map[string]any) (*desiredState, error) {
 	d := &desiredState{
 		version:      sourceVersion(src),
 		variant:      v.Name,
 		rollbackSafe: src.Spec.Rollback != nil && src.Spec.Rollback.Safe,
 	}
 	var err error
+	// Passed is left out when empty, so packages nothing passes values to
+	// keep the digest they had before it existed.
 	d.digest, err = digestOf(struct {
 		Package v1.PackageSpec
 		Retry   string
 		Source  v1.PackageSourceSpec
-	}{pkg.Spec, pkg.Annotations[AnnotationRetry], src.Spec})
+		Passed  map[string]map[string]any `json:",omitempty"`
+	}{pkg.Spec, pkg.Annotations[AnnotationRetry], src.Spec, passed})
 	if err != nil {
 		return nil, err
 	}
@@ -264,6 +271,9 @@ func (r *PackageReconciler) buildDesired(ctx context.Context, pkg *v1.Package, s
 			if err := json.Unmarshal(o.Values.Raw, &values); err != nil {
 				return nil, fmt.Errorf("values of component %s: %w", c.Name, err)
 			}
+		}
+		if p := passed[c.Name]; len(p) > 0 {
+			values = source.MergeValues(p, values)
 		}
 		ns, rel := placement(pkg, c)
 		bc := backend.Component{

@@ -93,6 +93,7 @@ When a package is not ready, its `Ready` condition says why:
 | `Conflict` | an installed package conflicts with this one | remove one of them |
 | `CRDOwnershipConflict` | another package owns a CRD this one ships | remove the other package, or drop the CRD from one of them |
 | `VariantNotFound` | the package has no such variant | fix `spec.variant` |
+| `ConflictingRequirements` | packages that require this one pass different values for the same key, or ask for different variants; the message names them | change or remove one of them; what runs now keeps running |
 | `RolledBack` (ready) | the package runs an earlier revision you asked for with `kubepkg rollback` | change the Package, or set `kubepkg.dev/retry`, when you want it to follow its spec again |
 | `UpgradeRolledBack` | the last upgrade failed and the package went back to the previous revision | read the message, fix, then change the Package or set `kubepkg.dev/retry` to try again |
 | `UpgradeFailed` | the last upgrade failed and could not be rolled back | fix forward: a corrected version or values, or set `kubepkg.dev/retry` to try the same again |

@@ -17,6 +17,9 @@ limitations under the License.
 package resolve
 
 import (
+	"encoding/json"
+	"fmt"
+
 	"github.com/kuberoot-dev/kubepkg/api/v1"
 )
 
@@ -42,13 +45,52 @@ func RequirementsOf(v *v1.Variant, ignore []string) []Requirement {
 		if q.Capability != "" && ignored[q.Capability] {
 			continue
 		}
-		out = append(out, Requirement{Package: q.Package, Capability: q.Capability, Version: q.Version, Optional: q.Optional})
+		r := Requirement{Package: q.Package, Capability: q.Capability, Version: q.Version, Optional: q.Optional, Variant: q.Variant}
+		r.Values, r.Invalid = requiredValues(q)
+		out = append(out, r)
 	}
 	return out
 }
 
-// ReleaseOf describes one variant of a package version for resolving.
-// A missing variant leaves the release without requirements.
+// requiredValues reads the values a requirement passes, by component.
+func requiredValues(q v1.Requirement) (map[string]map[string]any, string) {
+	var out map[string]map[string]any
+	for _, name := range sortedKeys(q.Components) {
+		c := q.Components[name]
+		if c.Values == nil || len(c.Values.Raw) == 0 {
+			continue
+		}
+		var vals map[string]any
+		if err := json.Unmarshal(c.Values.Raw, &vals); err != nil {
+			return nil, fmt.Sprintf("values for component %s are not an object: %v", name, err)
+		}
+		if len(vals) == 0 {
+			continue
+		}
+		if out == nil {
+			out = map[string]map[string]any{}
+		}
+		out[name] = vals
+	}
+	return out, ""
+}
+
+// CheckRequirement refuses what a requirement cannot carry: a variant or
+// values without a package, or values that are not an object.
+func CheckRequirement(q v1.Requirement) error {
+	if q.Package == "" && (q.Variant != "" || len(q.Components) > 0) {
+		return fmt.Errorf("requirement %s: variant and components apply to a required package only", q.Capability)
+	}
+	if _, invalid := requiredValues(q); invalid != "" {
+		return fmt.Errorf("requirement %s: %s", q.Package, invalid)
+	}
+	return nil
+}
+
+// ReleaseOf describes one variant of a package version for resolving,
+// with the requirements of its other variants for packages that require
+// it in one of them. A missing variant leaves the release without
+// requirements.
 func ReleaseOf(name string, spec *v1.PackageSourceSpec, variant string) Release {
 	r := Release{Name: name, Version: spec.Version, Provides: spec.Provides, Conflicts: spec.Conflicts}
 	if r.Version == "" {
@@ -58,8 +100,16 @@ func ReleaseOf(name string, spec *v1.PackageSourceSpec, variant string) Release 
 		variant = "default"
 	}
 	for i := range spec.Variants {
+		reqs := RequirementsOf(&spec.Variants[i], nil)
+		if r.Variants == nil {
+			r.Variants = map[string][]Requirement{}
+		}
+		r.Variants[spec.Variants[i].Name] = reqs
 		if spec.Variants[i].Name == variant {
-			r.Requires = RequirementsOf(&spec.Variants[i], nil)
+			r.Requires = reqs
+			if variant != "default" {
+				r.Variant = variant
+			}
 		}
 	}
 	return r

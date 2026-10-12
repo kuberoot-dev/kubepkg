@@ -19,8 +19,11 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -54,6 +57,9 @@ type Step struct {
 	Dependency bool
 	// Local means a hand-written PackageSource decides, not repositories.
 	Local bool
+	// SetVariant is the variant Package.spec.variant is set to, because a
+	// package requiring this one needs it; empty leaves it as it is.
+	SetVariant string
 }
 
 // Plan works out what installing reqs takes: the requested packages and
@@ -104,6 +110,16 @@ func Plan(ctx context.Context, c client.Client, store *repo.Store, policy repo.P
 		} else if !apierrors.IsNotFound(err) {
 			return nil, err
 		}
+		current := ""
+		pkg := &v1.Package{}
+		if err := c.Get(ctx, types.NamespacedName{Name: ch.Name}, pkg); err == nil {
+			current = pkg.Spec.Variant
+		} else if !apierrors.IsNotFound(err) {
+			return nil, err
+		}
+		if want := ch.Variant; want != "" && want != current && (current != "" || want != "default") {
+			s.SetVariant = want
+		}
 		out = append(out, s)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Dependency && !out[j].Dependency })
@@ -119,7 +135,11 @@ func requiredConstraints(cat resolve.Catalog, p resolve.Plan) map[string]string 
 			if r.Version != ch.To {
 				continue
 			}
-			for _, q := range r.Requires {
+			reqs := r.Requires
+			if vr, ok := r.Variants[ch.Variant]; ok {
+				reqs = vr
+			}
+			for _, q := range reqs {
 				if q.Package != "" && q.Version != "" && !q.Optional {
 					parts[q.Package] = append(parts[q.Package], q.Version)
 				}
@@ -147,14 +167,14 @@ func defaultConstraint(version string) string {
 // alone; the operator does the installing.
 func Apply(ctx context.Context, c client.Client, steps []Step) error {
 	for _, s := range steps {
-		if s.Action == resolve.ActionKeep {
+		if s.Action == resolve.ActionKeep && s.SetVariant == "" {
 			continue
 		}
 		pkg := &v1.Package{}
 		err := c.Get(ctx, types.NamespacedName{Name: s.Name}, pkg)
 		switch {
 		case apierrors.IsNotFound(err):
-			pkg = &v1.Package{ObjectMeta: metav1.ObjectMeta{Name: s.Name}, Spec: v1.PackageSpec{Version: s.Constraint}}
+			pkg = &v1.Package{ObjectMeta: metav1.ObjectMeta{Name: s.Name}, Spec: v1.PackageSpec{Version: s.Constraint, Variant: s.SetVariant}}
 			if s.Dependency {
 				pkg.Annotations = map[string]string{AnnotationDependency: s.Reason}
 			}
@@ -163,9 +183,18 @@ func Apply(ctx context.Context, c client.Client, steps []Step) error {
 			}
 		case err != nil:
 			return err
-		case pkg.Spec.Version != s.Constraint:
-			patch := client.MergeFrom(pkg.DeepCopy())
-			pkg.Spec.Version = s.Constraint
+		default:
+			before := pkg.DeepCopy()
+			if s.Action != resolve.ActionKeep {
+				pkg.Spec.Version = s.Constraint
+			}
+			if s.SetVariant != "" {
+				pkg.Spec.Variant = s.SetVariant
+			}
+			if pkg.Spec.Version == before.Spec.Version && pkg.Spec.Variant == before.Spec.Variant {
+				continue
+			}
+			patch := client.MergeFrom(before)
 			if err := c.Patch(ctx, pkg, patch); err != nil {
 				return fmt.Errorf("update package %s: %w", s.Name, err)
 			}
@@ -193,10 +222,13 @@ func WritePlan(w io.Writer, steps []Step) error {
 		return err
 	}
 	for _, s := range steps {
+		notes := passedNotes(s)
 		if s.Action == resolve.ActionKeep {
+			for _, n := range notes {
+				fmt.Fprintf(w, "  %s: %s\n", s.Name, n)
+			}
 			continue
 		}
-		var notes []string
 		spec := s.Entry.Spec
 		if len(spec.CRDs) > 0 {
 			notes = append(notes, "owns CRDs: "+strings.Join(spec.CRDs, ", "))
@@ -227,6 +259,24 @@ func WritePlan(w io.Writer, steps []Step) error {
 		}
 	}
 	return nil
+}
+
+// passedNotes says which variant a package is installed in for the
+// packages requiring it, and the values they pass to it.
+func passedNotes(s Step) []string {
+	var notes []string
+	from := strings.Join(s.Passed.From, ", ")
+	if s.SetVariant != "" {
+		notes = append(notes, "variant "+s.SetVariant+", needed by "+from)
+	}
+	for _, comp := range slices.Sorted(maps.Keys(s.Passed.Values)) {
+		raw, err := json.Marshal(s.Passed.Values[comp])
+		if err != nil {
+			continue
+		}
+		notes = append(notes, fmt.Sprintf("values for component %s from %s: %s", comp, from, raw))
+	}
+	return notes
 }
 
 // hasComponents is false for a meta package, which has nothing to roll back.

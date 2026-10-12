@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -230,5 +231,42 @@ func TestMetaPackageMovesItsMembers(t *testing.T) {
 	install("distro@~2.0")
 	if v := version("kubevirt"); v != "~1.10" {
 		t.Fatalf("the new distro version did not move kubevirt: %q", v)
+	}
+}
+
+func TestPlanShowsVariantsAndValuesFromRequiringPackages(t *testing.T) {
+	vm := spec("1.0.0")
+	vm.Variants = append(vm.Variants, v1.Variant{Name: "lite", Components: vm.Variants[0].Components})
+	meta := v1.PackageSourceSpec{Version: "0.1.0", Variants: []v1.Variant{{Name: "default", Requires: []v1.Requirement{{
+		Package: "vm", Variant: "lite",
+		Components: map[string]v1.RequiredComponent{"main": {Values: &apiextensionsv1.JSON{Raw: []byte(`{"grafana":{"enabled":false}}`)}}},
+	}}}}}
+	s := store(t, map[string][]v1.PackageSourceSpec{"vm": {vm}, "observability": {meta}})
+	c := fakeClient(t)
+	ctx := context.Background()
+	steps, err := Plan(ctx, c, s, repo.AllowAll{}, servedAPIs{}, "", parseRequests([]string{"observability"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := WritePlan(&buf, steps); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"vm: variant lite, needed by observability", "vm: values for component main from observability: {\"grafana\":{\"enabled\":false}}"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("plan lacks %q:\n%s", want, buf.String())
+		}
+	}
+	if err := Apply(ctx, c, steps); err != nil {
+		t.Fatal(err)
+	}
+	p := &v1.Package{}
+	if err := c.Get(ctx, types.NamespacedName{Name: "vm"}, p); err != nil {
+		t.Fatal(err)
+	}
+	// The variant is written; the values are not, the operator takes them
+	// from the requiring package, so they go when it goes.
+	if p.Spec.Variant != "lite" || len(p.Spec.Components) != 0 {
+		t.Fatalf("vm spec = %+v", p.Spec)
 	}
 }

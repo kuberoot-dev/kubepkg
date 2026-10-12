@@ -452,6 +452,25 @@ spec:
                               Capability is a required capability, e.g. "ingress" or
                               "api:cert-manager.io/v1".
                             type: string
+                          components:
+                            additionalProperties:
+                              description: |-
+                                RequiredComponent is what a package passes to one component of a
+                                package it requires.
+                              properties:
+                                values:
+                                  description: Values are Helm values for the component.
+                                  x-kubernetes-preserve-unknown-fields: true
+                              type: object
+                            description: |-
+                              Components passes values to components of the required package, by
+                              component name, so a distribution shapes the packages it requires
+                              without forking them. They go over the package's defaults and the
+                              platform values, and under the values set on the required package's
+                              Package. Two packages passing different values for the same key are
+                              a conflict, reported on the required package. Only meaningful with
+                              Package. Versions that use it need kubepkg 1.3 or later.
+                            type: object
                           optional:
                             description: |-
                               Optional requirements only order installation: if present, they must
@@ -459,6 +478,12 @@ spec:
                             type: boolean
                           package:
                             description: Package is the name of a required package.
+                            type: string
+                          variant:
+                            description: |-
+                              Variant is the variant of the required package this one needs. The
+                              CLI installs the package in it; the requirement is met only while
+                              the package runs it. Only meaningful with Package.
                             type: string
                           version:
                             description: |-
@@ -469,6 +494,9 @@ spec:
                         x-kubernetes-validations:
                         - message: exactly one of package or capability must be set
                           rule: has(self.package) != has(self.capability)
+                        - message: variant and components apply to a required package
+                            only
+                          rule: has(self.package) || (!has(self.variant) && !has(self.components))
                       type: array
                   required:
                   - name
@@ -989,6 +1017,25 @@ spec:
                               Capability is a required capability, e.g. "ingress" or
                               "api:cert-manager.io/v1".
                             type: string
+                          components:
+                            additionalProperties:
+                              description: |-
+                                RequiredComponent is what a package passes to one component of a
+                                package it requires.
+                              properties:
+                                values:
+                                  description: Values are Helm values for the component.
+                                  x-kubernetes-preserve-unknown-fields: true
+                              type: object
+                            description: |-
+                              Components passes values to components of the required package, by
+                              component name, so a distribution shapes the packages it requires
+                              without forking them. They go over the package's defaults and the
+                              platform values, and under the values set on the required package's
+                              Package. Two packages passing different values for the same key are
+                              a conflict, reported on the required package. Only meaningful with
+                              Package. Versions that use it need kubepkg 1.3 or later.
+                            type: object
                           optional:
                             description: |-
                               Optional requirements only order installation: if present, they must
@@ -996,6 +1043,12 @@ spec:
                             type: boolean
                           package:
                             description: Package is the name of a required package.
+                            type: string
+                          variant:
+                            description: |-
+                              Variant is the variant of the required package this one needs. The
+                              CLI installs the package in it; the requirement is met only while
+                              the package runs it. Only meaningful with Package.
                             type: string
                           version:
                             description: |-
@@ -1006,6 +1059,9 @@ spec:
                         x-kubernetes-validations:
                         - message: exactly one of package or capability must be set
                           rule: has(self.package) != has(self.capability)
+                        - message: variant and components apply to a required package
+                            only
+                          rule: has(self.package) || (!has(self.variant) && !has(self.components))
                       type: array
                   required:
                   - name
@@ -1527,6 +1583,25 @@ spec:
                               Capability is a required capability, e.g. "ingress" or
                               "api:cert-manager.io/v1".
                             type: string
+                          components:
+                            additionalProperties:
+                              description: |-
+                                RequiredComponent is what a package passes to one component of a
+                                package it requires.
+                              properties:
+                                values:
+                                  description: Values are Helm values for the component.
+                                  x-kubernetes-preserve-unknown-fields: true
+                              type: object
+                            description: |-
+                              Components passes values to components of the required package, by
+                              component name, so a distribution shapes the packages it requires
+                              without forking them. They go over the package's defaults and the
+                              platform values, and under the values set on the required package's
+                              Package. Two packages passing different values for the same key are
+                              a conflict, reported on the required package. Only meaningful with
+                              Package. Versions that use it need kubepkg 1.3 or later.
+                            type: object
                           optional:
                             description: |-
                               Optional requirements only order installation: if present, they must
@@ -1534,6 +1609,12 @@ spec:
                             type: boolean
                           package:
                             description: Package is the name of a required package.
+                            type: string
+                          variant:
+                            description: |-
+                              Variant is the variant of the required package this one needs. The
+                              CLI installs the package in it; the requirement is met only while
+                              the package runs it. Only meaningful with Package.
                             type: string
                           version:
                             description: |-
@@ -1544,6 +1625,9 @@ spec:
                         x-kubernetes-validations:
                         - message: exactly one of package or capability must be set
                           rule: has(self.package) != has(self.capability)
+                        - message: variant and components apply to a required package
+                            only
+                          rule: has(self.package) || (!has(self.variant) && !has(self.components))
                       type: array
                   required:
                   - name

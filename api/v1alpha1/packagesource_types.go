@@ -20,6 +20,7 @@ package v1alpha1
 import (
 	"github.com/fluxcd/pkg/apis/kustomize"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -168,6 +169,7 @@ type Variant struct {
 
 // Requirement is a dependency on a package or a capability.
 // +kubebuilder:validation:XValidation:rule="has(self.package) != has(self.capability)",message="exactly one of package or capability must be set"
+// +kubebuilder:validation:XValidation:rule="has(self.package) || (!has(self.variant) && !has(self.components))",message="variant and components apply to a required package only"
 type Requirement struct {
 	// Package is the name of a required package.
 	// +optional
@@ -187,6 +189,30 @@ type Requirement struct {
 	// be ready first; if absent, the package proceeds.
 	// +optional
 	Optional bool `json:"optional,omitempty"`
+
+	// Variant is the variant of the required package this one needs. The
+	// CLI installs the package in it; the requirement is met only while
+	// the package runs it. Only meaningful with Package.
+	// +optional
+	Variant string `json:"variant,omitempty"`
+
+	// Components passes values to components of the required package, by
+	// component name, so a distribution shapes the packages it requires
+	// without forking them. They go over the package's defaults and the
+	// platform values, and under the values set on the required package's
+	// Package. Two packages passing different values for the same key are
+	// a conflict, reported on the required package. Only meaningful with
+	// Package. Versions that use it need kubepkg 1.3 or later.
+	// +optional
+	Components map[string]RequiredComponent `json:"components,omitempty"`
+}
+
+// RequiredComponent is what a package passes to one component of a
+// package it requires.
+type RequiredComponent struct {
+	// Values are Helm values for the component.
+	// +optional
+	Values *apiextensionsv1.JSON `json:"values,omitempty"`
 }
 
 // Library defines a Helm library chart

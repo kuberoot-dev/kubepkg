@@ -81,6 +81,30 @@ Each member's `Package` gets the constraints that the packages requiring it set,
 
 Variants give a distribution profiles: `kubepkg install mydistro --variant minimal`.
 
+### Shaping the members
+
+A distribution often wants a member a little different from its defaults: the metrics stack without Grafana because the distribution ships another dashboard tool, a smaller retention, a lighter variant. A requirement can say so, without a fork of the member's recipe:
+
+```yaml title="recipes/kuberoot-observability/recipe.yaml (excerpt)"
+  package:
+    variants:
+      - name: default
+        requires:
+          - package: victoria-metrics
+            version: "~1.153"
+            variant: default                # which variant of the member to install
+            components:                     # values for the member's components, by name
+              victoria-metrics:
+                values:
+                  grafana: {enabled: false}
+```
+
+- `variant` picks the member's variant. `kubepkg install` writes it to the member's `Package`, and the requirement counts as met only while the member runs that variant. When the member's `Package` already names another variant, the plan stops and says so: that choice was made by hand.
+- `components` passes values to the member's components. The operator reads them from the requiring packages in the cluster, so they change when the distribution moves to a version that passes other values, and go away when it is removed. The member's values are layered, from lowest to highest: the package's defaults, the platform values, the values passed by the packages requiring it, the values set on the member's own `Package`. A cluster admin therefore still has the last word.
+- Two packages that pass different values for the same key of the same member, or ask for different variants, are a conflict. Nothing picks a winner: `kubepkg plan` fails and names both, and in the cluster the member reports `ConflictingRequirements` and keeps running what it ran until one of them changes. Values that agree, or set different keys, merge.
+
+`kubepkg plan` shows, for each member, the variant it is installed in and the values passed to it. Versions that use `variant` or `components` in a requirement need kubepkg 1.3 or later; an older cluster or CLI leaves just those versions out of the index and says so, as for anything built for a newer kubepkg.
+
 ## 3. Platform-wide values
 
 Some values belong to the cluster, not to a package: the cluster domain, the ACME issuer, a registry mirror, the storage class. Put them in one Secret, and the operator layers them under every component's values:
