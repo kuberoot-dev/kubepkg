@@ -44,7 +44,7 @@ The `Ready` condition of a repository has one of these reasons:
 
 A refused or failed refresh never removes packages. The index accepted before stays in use until a valid newer one arrives.
 
-The operator fetches the index again every `interval`, and a minute after a failed fetch. It asks the server whether the index changed since the last fetch (`ETag`, `Last-Modified`), so an unchanged index is not downloaded again, and an index that did not change does not make packages select their versions again. To fetch it now, change any annotation on the Repository:
+The operator fetches the index again every `interval`, and a minute after a failed fetch. It asks the server whether the index changed since the last fetch (`ETag`), so an unchanged index is not downloaded again, and an index that did not change does not make packages select their versions again. To fetch it now, change any annotation on the Repository:
 
 ```bash
 kubectl annotate repository main kubepkg.dev/refresh="$(date +%s)" --overwrite

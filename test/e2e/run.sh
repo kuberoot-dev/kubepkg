@@ -170,8 +170,8 @@ wait_reason demo RolledBack
 echo "  revisions: $(revisions demo)"
 
 step "7. the CLI reports packages and history"
-"${ROOT}/bin/kubepkg" --context "${KCTX}" list | grep -Eq '^demo +1\.0\.0 +5 ' || fail "list does not show demo 1.0.0 at revision 5"
-"${ROOT}/bin/kubepkg" --context "${KCTX}" history demo | grep -Eq '^5 +1\.0\.0 +Applied .*restored from 1' || fail "history does not show the restore"
+"${ROOT}/bin/kubepkg" --context "${KCTX}" list | grep -Eq '^demo +1\.0\.0 +7 ' || fail "list does not show demo 1.0.0 at revision 7"
+"${ROOT}/bin/kubepkg" --context "${KCTX}" history demo | grep -Eq '^7 +1\.0\.0 +Applied .*restored from 1' || fail "history does not show the restore"
 
 step "8. a package made of a published chart, with no package tree"
 mkdir -p "${WORK}/hello/templates"

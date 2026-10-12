@@ -40,8 +40,10 @@ type IndexFetcher interface {
 }
 
 // HTTPFetcher fetches indexes over HTTP(S). With a Cache it asks the
-// server whether a file changed since it last fetched it (ETag,
-// Last-Modified), so refreshing an unchanged repository downloads nothing.
+// server whether a file changed since it last fetched it, by ETag, so
+// refreshing an unchanged repository downloads nothing. Last-Modified is
+// not used: it has a resolution of a second and would hide an index
+// rewritten within the second it was fetched.
 type HTTPFetcher struct {
 	Cache *HTTPCache
 }
@@ -61,8 +63,8 @@ type HTTPCache struct {
 }
 
 type cachedResponse struct {
-	etag, lastModified string
-	body               []byte
+	etag string
+	body []byte
 }
 
 func (c *HTTPCache) fetch(ctx context.Context, u string) ([]byte, error) {
@@ -73,11 +75,8 @@ func (c *HTTPCache) fetch(ctx context.Context, u string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if ok && prev.etag != "" {
+	if ok {
 		req.Header.Set("If-None-Match", prev.etag)
-	}
-	if ok && prev.lastModified != "" {
-		req.Header.Set("If-Modified-Since", prev.lastModified)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -99,9 +98,9 @@ func (c *HTTPCache) fetch(ctx context.Context, u string) ([]byte, error) {
 	if len(body) > maxIndexBytes {
 		return nil, fmt.Errorf("GET %s: more than %d bytes", u, maxIndexBytes)
 	}
-	entry := cachedResponse{etag: resp.Header.Get("ETag"), lastModified: resp.Header.Get("Last-Modified"), body: body}
+	entry := cachedResponse{etag: resp.Header.Get("ETag"), body: body}
 	c.mu.Lock()
-	if entry.etag == "" && entry.lastModified == "" {
+	if entry.etag == "" {
 		delete(c.entries, u) // nothing to ask with next time
 	} else {
 		if c.entries == nil {

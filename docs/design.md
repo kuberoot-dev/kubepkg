@@ -359,7 +359,7 @@ The operator keeps every index loaded. A `Package` with no hand-written `Package
 - A hand-written `PackageSource` always wins, which is how a cluster overrides a package locally.
 - Selection waits until every repository has been fetched once, so after a restart a low priority index that loads first cannot win for a moment.
 - A failed refresh keeps the index loaded before; a repository that never loaded leaves its packages at `VersionNotAvailable`.
-- The index is fetched every `interval` (default 10m), a minute after a failure, and when the Repository's spec or annotations change. Fetches are conditional (`ETag`, `Last-Modified`), and only an accepted index with another digest makes packages select again.
+- The index is fetched every `interval` (default 10m), a minute after a failure, and when the Repository's spec or annotations change. Fetches are conditional (`ETag`), and only an accepted index with another digest makes packages select again.
 - Requirements are not installed automatically: a package whose requirements are missing reports `RequirementsNotMet`. Installing a package together with what it needs is the CLI's job, so the cluster state stays explicit.
 
 A distribution adds index transports by URL scheme (`http` and `https` are built in) and a policy that admits indexes and versions — signature checks, allowed registries — through `operator.Options`.
