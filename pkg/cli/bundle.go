@@ -160,7 +160,7 @@ those unless told to accept them.`,
 			if err != nil {
 				return err
 			}
-			chosen, order, _, err := resolveFresh(ctx, store, cl.policy, parseRequests(args), variant)
+			chosen, order, _, _, err := resolveFresh(ctx, store, cl.policy, parseRequests(args), variant)
 			if err != nil {
 				return err
 			}

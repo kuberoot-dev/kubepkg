@@ -20,6 +20,7 @@ Indexes, their signatures and roots of trust are read by clusters and CLIs of ma
 - **A version that uses something a reader does not know is left out, not fatal.** The reader names it in the Repository status and in a CLI warning, and uses the rest of the index.
 - **A root that uses something a reader does not know is refused, and says so.** The reader cannot tell what the root means, so it does not guess: it reports that the root needs a newer kubepkg. The release notes name every such root feature and the first release that understands it. Delegations, from 0.5, are the first. Upgrade the clusters before publishing a root that uses one.
 - The index format carries `apiVersion: kubepkg.dev/v1alpha1` as its own format version, which is unrelated to the cluster API.
+- Fields added to the package spec in a minor release are covered by the rule above. From 1.3, a requirement may carry `variant` and `components`; releases before 1.3 leave the versions that use them out. Publish such versions once the clusters that should see them run 1.3.
 
 Recipes (`kind: Recipe`) and bundles follow the same rules as the cluster API: within 1.x, a recipe that builds keeps building, and any release reads a bundle made by an earlier one.
 

@@ -46,6 +46,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/kuberoot-dev/kubepkg/api/v1"
+	"github.com/kuberoot-dev/kubepkg/pkg/resolve"
 	"github.com/kuberoot-dev/kubepkg/pkg/source"
 )
 
@@ -310,6 +311,11 @@ func Newer(a, b Version) bool {
 func checkSource(spec *v1.PackageSourceSpec) error {
 	usesTree := false
 	for _, v := range spec.Variants {
+		for _, q := range v.Requires {
+			if err := resolve.CheckRequirement(q); err != nil {
+				return fmt.Errorf("variant %s: %w", v.Name, err)
+			}
+		}
 		for _, c := range v.Components {
 			if (c.Path == "") == (c.Chart == nil) {
 				return fmt.Errorf("component %s: set exactly one of path and chart", c.Name)

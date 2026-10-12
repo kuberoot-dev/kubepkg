@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	crcontroller "sigs.k8s.io/controller-runtime/pkg/controller"
 	"slices"
 	"sort"
@@ -159,6 +160,13 @@ func (r *PackageReconciler) reconcile(ctx context.Context, pkg *v1.Package) (ctr
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	// What the packages requiring this one pass to it. Choosing between
+	// two that disagree would break one of them, so that stops here.
+	passed, err := passedTo(pkg.Name, st)
+	if err != nil {
+		setReady(pkg, metav1.ConditionFalse, v1.ReasonConflictingRequirements, err.Error())
+		return ctrl.Result{}, nil
+	}
 	reqs := requirementsOf(pkg, v)
 	unmet, err := resolve.Check(reqs, st)
 	if err != nil {
@@ -192,7 +200,7 @@ func (r *PackageReconciler) reconcile(ctx context.Context, pkg *v1.Package) (ctr
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	d, err := r.buildDesired(ctx, pkg, src, v, depReleases)
+	d, err := r.buildDesired(ctx, pkg, src, v, depReleases, passed.Values)
 	if err != nil {
 		setReady(pkg, metav1.ConditionFalse, "InvalidConfiguration", err.Error())
 		return ctrl.Result{}, nil
@@ -1044,6 +1052,43 @@ func (r *PackageReconciler) namespaceFacts(ctx context.Context, targets map[stri
 	return out, unpinned, nil
 }
 
+// passedTo merges what the packages in the cluster that require name pass
+// to it.
+func passedTo(name string, st resolve.State) (resolve.Passed, error) {
+	requirers := make([]resolve.Release, 0, len(st.Packages))
+	for _, n := range slices.Sorted(maps.Keys(st.Packages)) {
+		if p := st.Packages[n]; !p.Leaving {
+			requirers = append(requirers, p.Release)
+		}
+	}
+	return resolve.MergePasses(name, resolve.PassesTo(name, requirers))
+}
+
+// requiredBy maps a Package or PackageSource to the packages it requires,
+// so a package learns at once when what is passed to it changes.
+func requiredBy(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+		src, ok := o.(*v1.PackageSource)
+		if !ok {
+			src = &v1.PackageSource{}
+			if err := c.Get(ctx, types.NamespacedName{Name: o.GetName()}, src); err != nil {
+				return nil
+			}
+		}
+		seen := map[string]bool{}
+		var out []reconcile.Request
+		for _, v := range src.Spec.Variants {
+			for _, q := range v.Requires {
+				if q.Package != "" && q.Package != src.Name && !seen[q.Package] && (q.Variant != "" || len(q.Components) > 0) {
+					seen[q.Package] = true
+					out = append(out, reconcile.Request{NamespacedName: types.NamespacedName{Name: q.Package}})
+				}
+			}
+		}
+		return out
+	})
+}
+
 // SetupWithManager wires the watches. Any Package change re-queues the
 // packages that are not ready, because they may be waiting on it; at
 // platform scale that is a few dozen objects and simpler than an index.
@@ -1069,7 +1114,9 @@ func (r *PackageReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		WithOptions(crcontroller.Options{MaxConcurrentReconciles: max(r.Workers, 1)}).
 		For(&v1.Package{}).
 		Watches(&v1.PackageSource{}, sameName).
-		Watches(&v1.Package{}, waiting)
+		Watches(&v1.Package{}, waiting).
+		Watches(&v1.PackageSource{}, requiredBy(mgr.GetClient())).
+		Watches(&v1.Package{}, requiredBy(mgr.GetClient()))
 	if r.Repositories != nil {
 		b = b.Watches(&v1.Repository{}, allPackages(mgr.GetClient()), builder.WithPredicates(indexChanged()))
 	}

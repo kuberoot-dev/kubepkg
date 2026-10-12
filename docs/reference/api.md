@@ -243,8 +243,10 @@ Short names: `pks`.
 | `variants[].name` | string, required | Name is the unique identifier for this variant |
 | `variants[].requires` | []object | Requires lists packages or capabilities this variant needs. |
 | `variants[].requires[].capability` | string | Capability is a required capability, e.g. "ingress" or "api:cert-manager.io/v1". |
+| `variants[].requires[].components` | object | Components passes values to components of the required package, by component name, so a distribution shapes the packages it requires without forking them. They go over the package's defaults and the platform values, and under the values set on the required package's Package. Two packages passing different values for the same key are a conflict, reported on the required package. Only meaningful with Package. Versions that use it need kubepkg 1.3 or later. |
 | `variants[].requires[].optional` | boolean | Optional requirements only order installation: if present, they must be ready first; if absent, the package proceeds. |
 | `variants[].requires[].package` | string | Package is the name of a required package. |
+| `variants[].requires[].variant` | string | Variant is the variant of the required package this one needs. The CLI installs the package in it; the requirement is met only while the package runs it. Only meaningful with Package. |
 | `variants[].requires[].version` | string | Version is a semver constraint on the required package, e.g. ">=1.2 <2". Only meaningful with Package. |
 | `version` | string | Version is the semantic version of this package. Empty means unversioned (see UnversionedVersion). |
 

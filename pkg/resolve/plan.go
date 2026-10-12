@@ -53,6 +53,10 @@ type Change struct {
 	// Reason says why the package is in the plan: "requested" or the
 	// requirement that pulled it in.
 	Reason string
+	// Variant is the variant the package is resolved in.
+	Variant string
+	// Passed is what the packages requiring this one pass to it.
+	Passed Passed
 }
 
 // Plan is the outcome of resolving a set of requests.
@@ -72,6 +76,7 @@ const maxSteps = 10000
 type goal struct {
 	pkg        string // package goal
 	constraint string
+	variant    string
 	capability string // capability goal
 	origin     string
 }
@@ -82,28 +87,45 @@ type search struct {
 	steps int
 	// deepest failure seen, reported when everything fails
 	why string
+	// pins are variants asked for by a package found late in a search
+	// that had already chosen the package in another variant; the next
+	// search starts with them.
+	pins  map[string]string
+	repin *goal
 }
+
+// maxPins bounds the restarts for variants asked for late.
+const maxPins = 32
 
 // Resolve picks a release for every requested package and everything they
 // require. Already installed versions are kept when they still satisfy the
 // constraints, so asking for one package does not silently upgrade its
 // dependencies; requested packages get the highest acceptable version.
 func Resolve(cat Catalog, st State, reqs []Request) (Plan, error) {
-	s := &search{cat: cat, st: st}
 	var goals []goal
 	requested := map[string]bool{}
 	for _, r := range reqs {
 		goals = append(goals, goal{pkg: r.Name, constraint: r.Version, origin: "requested"})
 		requested[r.Name] = true
 	}
-	chosen, origins, ok := s.solve(goals, map[string]Release{}, map[string][]goal{}, requested)
-	if !ok {
+	pins := map[string]string{}
+	for {
+		s := &search{cat: cat, st: st, pins: pins}
+		chosen, origins, ok := s.solve(goals, map[string]Release{}, map[string][]goal{}, requested)
+		if ok {
+			return s.plan(chosen, origins)
+		}
+		// A package asked for a variant of one already chosen in
+		// another: start again with that variant, once per package.
+		if g := s.repin; g != nil && pins[g.pkg] == "" && len(pins) < maxPins {
+			pins[g.pkg] = g.variant
+			continue
+		}
 		if s.why == "" {
 			s.why = "no candidates"
 		}
 		return Plan{}, fmt.Errorf("%w: %s", ErrUnresolvable, s.why)
 	}
-	return s.plan(chosen, origins), nil
 }
 
 func (s *search) fail(msg string) bool {
@@ -140,9 +162,21 @@ func (s *search) solve(goals []goal, chosen map[string]Release, cons map[string]
 			s.fail(fmt.Sprintf("%s %s is selected, but %s needs %s", g.pkg, r.Version, g.origin, g.constraint))
 			return nil, nil, false
 		}
+		if g.variant != "" && g.variant != r.VariantName() {
+			if s.pins[g.pkg] == "" && !s.variantFixed(g.pkg) {
+				s.repin = &g
+			}
+			s.fail(fmt.Sprintf("%s is selected in variant %s, but %s needs variant %s", g.pkg, r.VariantName(), g.origin, g.variant))
+			return nil, nil, false
+		}
 		return s.solve(rest, chosen, cons, requested)
 	}
 
+	variant, err := s.variantFor(g)
+	if err != nil {
+		s.fail(err.Error())
+		return nil, nil, false
+	}
 	cands, err := s.candidates(g.pkg, cons[g.pkg], requested[g.pkg])
 	if err != nil {
 		s.fail(err.Error())
@@ -153,6 +187,11 @@ func (s *search) solve(goals []goal, chosen map[string]Release, cons map[string]
 		return nil, nil, false
 	}
 	for _, r := range cands {
+		r, ok := r.inVariant(variant)
+		if !ok {
+			s.fail(fmt.Sprintf("%s %s has no variant %s (needed by %s)", r.Name, r.Version, variant, g.origin))
+			continue
+		}
 		if c := s.conflictsWith(r, chosen); c != "" {
 			s.fail(fmt.Sprintf("%s %s conflicts with %s", r.Name, r.Version, c))
 			continue
@@ -165,6 +204,34 @@ func (s *search) solve(goals []goal, chosen map[string]Release, cons map[string]
 		}
 	}
 	return nil, nil, false
+}
+
+// variantFixed reports whether the cluster's Package names a variant.
+func (s *search) variantFixed(name string) bool {
+	inst, ok := s.st.Packages[name]
+	return ok && inst.VariantSet
+}
+
+// variantFor is the variant a package goal is resolved in: the one asked
+// for, a pinned one, the one the installed Package names, or the
+// catalog's.
+func (s *search) variantFor(g goal) (string, error) {
+	inst, installed := s.st.Packages[g.pkg]
+	fixed := installed && inst.VariantSet
+	switch {
+	case g.variant != "" && fixed && g.variant != inst.VariantName():
+		return "", fmt.Errorf("%s is installed as variant %s, but %s needs variant %s", g.pkg, inst.VariantName(), g.origin, g.variant)
+	case g.variant != "":
+		if p := s.pins[g.pkg]; p != "" && p != g.variant {
+			return "", fmt.Errorf("%s needs variant %s of %s, another package needs variant %s", g.origin, g.variant, g.pkg, p)
+		}
+		return g.variant, nil
+	case s.pins[g.pkg] != "":
+		return s.pins[g.pkg], nil
+	case fixed:
+		return inst.VariantName(), nil
+	}
+	return "", nil
 }
 
 func (s *search) solveCapability(g goal, rest []goal, chosen map[string]Release, cons map[string][]goal, requested map[string]bool) (map[string]Release, map[string][]goal, bool) {
@@ -266,11 +333,28 @@ func (s *search) conflictsWith(r Release, chosen map[string]Release) string {
 	return ""
 }
 
-func (s *search) plan(chosen map[string]Release, cons map[string][]goal) Plan {
+func (s *search) plan(chosen map[string]Release, cons map[string][]goal) (Plan, error) {
+	// What every package that will be there passes to the ones it
+	// requires: the chosen releases and the installed packages that stay.
+	requirers := make([]Release, 0, len(chosen)+len(s.st.Packages))
+	for _, name := range sortedKeys(chosen) {
+		requirers = append(requirers, chosen[name])
+	}
+	for _, name := range sortedKeys(s.st.Packages) {
+		if _, replaced := chosen[name]; !replaced && !s.st.Packages[name].Leaving {
+			requirers = append(requirers, s.st.Packages[name].Release)
+		}
+	}
 	var p Plan
+	var conflicts []error
 	for _, name := range sortedKeys(chosen) {
 		r := chosen[name]
-		c := Change{Name: name, To: r.Version, Reason: reason(cons[name])}
+		c := Change{Name: name, To: r.Version, Reason: reason(cons[name]), Variant: r.VariantName()}
+		passed, err := MergePasses(name, PassesTo(name, requirers))
+		if err != nil {
+			conflicts = append(conflicts, err)
+		}
+		c.Passed = passed
 		inst, ok := s.st.Packages[name]
 		switch {
 		case !ok:
@@ -284,7 +368,10 @@ func (s *search) plan(chosen map[string]Release, cons map[string][]goal) Plan {
 		}
 		p.Changes = append(p.Changes, c)
 	}
-	return p
+	if len(conflicts) > 0 {
+		return Plan{}, errors.Join(conflicts...)
+	}
+	return p, nil
 }
 
 func requirementGoals(r Release) []goal {
@@ -295,7 +382,7 @@ func requirementGoals(r Release) []goal {
 		}
 		origin := r.Name + " " + r.Version
 		if q.Package != "" {
-			out = append(out, goal{pkg: q.Package, constraint: q.Version, origin: origin})
+			out = append(out, goal{pkg: q.Package, constraint: q.Version, variant: q.Variant, origin: origin})
 		} else {
 			out = append(out, goal{capability: q.Capability, origin: origin})
 		}

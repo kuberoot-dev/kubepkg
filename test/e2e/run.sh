@@ -216,6 +216,14 @@ spec:
 EOF
 wait_reason hello ReconciliationSucceeded
 [[ "$(image_of e2e-hello hello)" == registry.k8s.io/pause:3.9 ]] || fail "package values did not reach the published chart"
+# Values taken off the Package leave the release: the chart's default comes back.
+${K} patch packages.kubepkg.dev hello --type merge -p '{"spec":{"components":null}}' >/dev/null
+for ((i = 0; i < 120; i += 3)); do
+  [[ "$(image_of e2e-hello hello)" == registry.k8s.io/pause:3.10 ]] && break
+  sleep 3
+done
+[[ "$(image_of e2e-hello hello)" == registry.k8s.io/pause:3.10 ]] || fail "values removed from the Package stayed in the release"
+wait_reason hello ReconciliationSucceeded
 bad=$(${K} apply -f - 2>&1 <<EOF || true
 apiVersion: kubepkg.dev/v1
 kind: PackageSource

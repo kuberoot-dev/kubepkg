@@ -33,6 +33,7 @@ import (
 
 	"github.com/kuberoot-dev/kubepkg/pkg/images"
 	"github.com/kuberoot-dev/kubepkg/pkg/repo"
+	"github.com/kuberoot-dev/kubepkg/pkg/resolve"
 )
 
 // Report is what Validate found. Errors make a recipe unfit to publish;
@@ -59,6 +60,13 @@ func Validate(ctx context.Context, dir string, opts Options) Report {
 	rep.Recipe = res.Recipe.Metadata.Name
 	if res.Recipe.Metadata.Annotations[repo.AnnotationDescription] == "" {
 		rep.Warnings = append(rep.Warnings, "no "+repo.AnnotationDescription+" annotation: search shows nothing for the package")
+	}
+	for _, v := range res.Recipe.Spec.Package.Variants {
+		for _, q := range v.Requires {
+			if err := resolve.CheckRequirement(q); err != nil {
+				rep.Errors = append(rep.Errors, fmt.Sprintf("variant %s: %v", v.Name, err))
+			}
+		}
 	}
 	if len(res.Recipe.Spec.Charts) == 0 {
 		return rep // a meta package ships nothing to check

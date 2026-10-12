@@ -35,8 +35,12 @@ const (
 	ReasonRolledBack            = "RolledBack"
 	ReasonPackageSourceNotFound = "PackageSourceNotFound"
 	ReasonVariantNotFound       = "VariantNotFound"
-	ReasonApplied               = "ReconciliationSucceeded"
-	ReasonProgressing           = "Progressing"
+	// ReasonConflictingRequirements: packages that require this one ask
+	// for different variants of it or pass different values for the same
+	// key; the message names them.
+	ReasonConflictingRequirements = "ConflictingRequirements"
+	ReasonApplied                 = "ReconciliationSucceeded"
+	ReasonProgressing             = "Progressing"
 )
 
 // CRD policies applied when a package is removed.

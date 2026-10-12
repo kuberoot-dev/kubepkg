@@ -137,7 +137,7 @@ A rollback is the operator re-applying an earlier revision's recorded state; it 
 
 A requirement is satisfied by:
 
-- `package: X, version: C` — a `Package` named X is Ready and its applied version satisfies C;
+- `package: X, version: C` — a `Package` named X is Ready and its applied version satisfies C, and, with `variant: V`, runs variant V;
 - `capability: Y` — a Ready package lists Y in `provides`, or Y has the form `api:<group>/<version>` and the API server serves that group version (discovery), so components installed outside kubepkg still count.
 
 Requirements marked `optional: true` only order installation: if the requirement is present it must be Ready first; if it is absent the package proceeds.
@@ -150,6 +150,7 @@ A package is blocked, with condition `Ready=False`, when:
 |---|---|
 | `VersionMismatch` | the PackageSource version does not satisfy `Package.spec.version` |
 | `RequirementsNotMet` | a requirement is missing or not Ready; the message names it |
+| `ConflictingRequirements` | packages that require this one ask for different variants of it or pass different values for the same key |
 | `Conflict` | an installed package matches an entry in `conflicts`, in either direction |
 | `CRDOwnershipConflict` | a CRD in `crds` is owned by another package |
 | `UpgradeFailed` | the latest revision failed and was not rolled back; it is retried with backoff |
@@ -264,6 +265,8 @@ spec:
           - {package: kubevirt, version: "~1.10"}
           - {package: cdi}
 ```
+
+A requirement can also choose the member's `variant` and pass values to its `components`; see [Shaping the members](guides/distributions.md#shaping-the-members). Values are layered: package defaults, platform values, values passed by the requiring packages, the member's own `Package` values. Two requiring packages that disagree on a key or a variant are a conflict, reported by the plan and by the member as `ConflictingRequirements`, never resolved by picking one.
 
 `kubepkg install mydistro` installs every member and the meta package itself. Each member's `Package` gets the constraints the packages requiring it set (all of them must hold), or follows patch releases when none is set, so installing `mydistro@2.0.0` over 1.0.0 moves the members to the versions 2.0.0 asks for. The operator reports the meta package Ready once every member is; it installs nothing of its own. Platform-wide settings reach the members through the platform values Secret.
 

@@ -112,7 +112,7 @@ func resolvedPackages(ctx context.Context, cl *cluster, repos []string, trust tr
 	if err != nil {
 		return nil, err
 	}
-	chosen, order, _, err := resolveFresh(ctx, store, cl.policy, parseRequests(args), variant)
+	chosen, order, _, _, err := resolveFresh(ctx, store, cl.policy, parseRequests(args), variant)
 	if err != nil {
 		return nil, err
 	}

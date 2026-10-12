@@ -95,13 +95,21 @@ func ClusterState(ctx context.Context, c client.Reader, apis APIs) (resolve.Stat
 	}
 	for i := range pkgs.Items {
 		p := &pkgs.Items[i]
-		inst := resolve.Installed{Release: resolve.Release{Name: p.Name, Version: p.Status.Version}, Ready: isReady(p.Status.Conditions)}
+		inst := resolve.Installed{
+			Release:    resolve.Release{Name: p.Name, Version: p.Status.Version, Variant: p.Spec.Variant},
+			Ready:      isReady(p.Status.Conditions),
+			VariantSet: p.Spec.Variant != "",
+			Leaving:    !p.DeletionTimestamp.IsZero(),
+		}
 		var src v1.PackageSource
 		if err := c.Get(ctx, types.NamespacedName{Name: p.Name}, &src); err == nil {
 			inst.Provides = src.Spec.Provides
 			inst.Conflicts = src.Spec.Conflicts
 			if inst.Version == "" {
 				inst.Version = sourceVersion(&src)
+			}
+			if v := findVariant(&src, variantName(p)); v != nil {
+				inst.Requires = requirementsOf(p, v)
 			}
 		} else if !apierrors.IsNotFound(err) {
 			return st, err

@@ -143,6 +143,10 @@ func (b *Backend) Apply(ctx context.Context, c backend.Component) (backend.State
 	// The package decides about rollbacks for all its components together;
 	// a per-release rollback here would leave the package half reverted.
 	up.RollbackOnFailure = false
+	// The values given are all the values: without this, Helm keeps the
+	// previous release's values when none are given, so values removed
+	// from a Package, or passed by a package that went away, would stay.
+	up.ResetValues = true
 	// The package owns what its charts contain. Operators often rewrite
 	// fields of their own CRDs and resources; server-side apply would then
 	// refuse every upgrade with a field manager conflict, where Helm 3's
