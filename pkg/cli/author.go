@@ -37,19 +37,47 @@ import (
 	"github.com/kuberoot-dev/kubepkg/pkg/source"
 )
 
-func userCacheFetcher(plainHTTP bool) (*source.Fetcher, error) {
+// plainHTTPFlags say which registries a command reaches without TLS.
+type plainHTTPFlags struct {
+	all   bool
+	hosts []string
+}
+
+func (p *plainHTTPFlags) bind(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&p.all, "plain-http", false, "talk to every registry without TLS (local registries only; prefer --plain-http-registry)")
+	cmd.Flags().StringArrayVar(&p.hosts, "plain-http-registry", nil, "registry host[:port] to reach without TLS, e.g. a local registry (repeatable); others keep TLS")
+}
+
+func (p plainHTTPFlags) registries() (*source.Registries, error) {
+	for _, h := range p.hosts {
+		if err := source.CheckRegistryHost(h); err != nil {
+			return nil, fmt.Errorf("--plain-http-registry: %w", err)
+		}
+	}
+	return source.NewRegistries(p.hosts...), nil
+}
+
+func (p plainHTTPFlags) resolver(registryConfig string) *images.Resolver {
+	return &images.Resolver{CredentialsFile: registryConfig, PlainHTTP: p.all, PlainHTTPRegistries: p.hosts}
+}
+
+func userCacheFetcher(plain plainHTTPFlags) (*source.Fetcher, error) {
 	d, err := os.UserCacheDir()
 	if err != nil {
 		return nil, err
 	}
-	return &source.Fetcher{CacheDir: filepath.Join(d, "kubepkg"), PlainHTTP: plainHTTP}, nil
+	hosts, err := plain.registries()
+	if err != nil {
+		return nil, err
+	}
+	return &source.Fetcher{CacheDir: filepath.Join(d, "kubepkg"), PlainHTTP: plain.all, PlainHTTPRegistries: hosts}, nil
 }
 
 func initCmd() *cobra.Command {
 	var (
 		in             build.InitInput
 		chart          string
-		plainHTTP      bool
+		plainHTTP      plainHTTPFlags
 		noImages       bool
 		registryConfig string
 	)
@@ -83,7 +111,7 @@ the package deploys on its own, then run "kubepkg validate".
 				return err
 			}
 			if !noImages {
-				in.Images = &images.Resolver{CredentialsFile: registryConfig, PlainHTTP: plainHTTP}
+				in.Images = plainHTTP.resolver(registryConfig)
 			}
 			if err := build.Init(cmd.Context(), args[0], in, f); err != nil {
 				return err
@@ -98,7 +126,7 @@ the package deploys on its own, then run "kubepkg validate".
 	cmd.Flags().StringVar(&in.Version, "version", "", "upstream version (default: the chart's appVersion)")
 	cmd.Flags().StringVar(&in.Namespace, "namespace", "", "install namespace (default: the package name)")
 	cmd.Flags().StringVar(&in.Description, "description", "", "one line about the package (default: the chart's)")
-	cmd.Flags().BoolVar(&plainHTTP, "plain-http", false, "talk to registries without TLS (local registries only)")
+	plainHTTP.bind(cmd)
 	cmd.Flags().BoolVar(&noImages, "no-images", false, "do not pin images (no registry access); fill package.images later with kubepkg images")
 	cmd.Flags().StringVar(&registryConfig, "registry-config", "", "Docker config file with registry credentials, for pinning private images")
 	return cmd
@@ -106,7 +134,7 @@ the package deploys on its own, then run "kubepkg validate".
 
 func imagesCmd(cl *cluster) *cobra.Command {
 	var (
-		plainHTTP      bool
+		plainHTTP      plainHTTPFlags
 		registryConfig string
 		inCluster      bool
 	)
@@ -152,7 +180,7 @@ by namespace and owner, and fails when there is any.`,
 			if err != nil {
 				return err
 			}
-			r := images.Resolver{CredentialsFile: registryConfig, PlainHTTP: plainHTTP}
+			r := plainHTTP.resolver(registryConfig)
 			listed := res.Recipe.Spec.Package.Images
 			var out []string
 			seen := map[string]bool{}
@@ -188,7 +216,7 @@ by namespace and owner, and fails when there is any.`,
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&plainHTTP, "plain-http", false, "talk to registries without TLS (local registries only)")
+	plainHTTP.bind(cmd)
 	cmd.Flags().StringVar(&registryConfig, "registry-config", "", "Docker config file with registry credentials")
 	cmd.Flags().BoolVar(&inCluster, "cluster", false, "check the images running in package namespaces against what the packages pin")
 	return cmd
@@ -257,7 +285,7 @@ func checkClusterImages(cmd *cobra.Command, cl *cluster) error {
 }
 
 func validateCmd() *cobra.Command {
-	var plainHTTP bool
+	var plainHTTP plainHTTPFlags
 	cmd := &cobra.Command{
 		Use:   "validate <recipe-dir>...",
 		Short: "Build recipes without publishing and check them",
@@ -302,7 +330,7 @@ is searched for recipes below it.`,
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&plainHTTP, "plain-http", false, "talk to registries without TLS (local registries only)")
+	plainHTTP.bind(cmd)
 	return cmd
 }
 

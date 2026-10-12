@@ -31,6 +31,7 @@ import (
 
 	"github.com/kuberoot-dev/kubepkg/api/v1"
 	"github.com/kuberoot-dev/kubepkg/pkg/repo"
+	"github.com/kuberoot-dev/kubepkg/pkg/source"
 )
 
 // fakeIndexes serves index bytes by URL under the test:// scheme.
@@ -254,5 +255,37 @@ func TestSignedRepositories(t *testing.T) {
 	e.reconcile("app")
 	if v := e.source("app").Spec.Version; v != "1.1.0" {
 		t.Fatalf("the newer accepted index must stay in use, got %s", v)
+	}
+}
+
+func TestRepositoryPlainHTTPRegistries(t *testing.T) {
+	e := newRepoEnv(t)
+	plain := &source.Registries{}
+	e.rr.Repositories.PlainHTTP = plain
+	e.indexes["test://lab/index.yaml"] = indexOf(t, "1.0.0")
+	e.create(&v1.Repository{ObjectMeta: metav1.ObjectMeta{Name: "lab"}, Spec: v1.RepositorySpec{
+		URL: "test://lab/index.yaml", AllowUnsigned: true, PlainHTTPRegistries: []string{"registry.lab:5000"},
+	}})
+	e.fetch("lab")
+	if !plain.Has("registry.lab:5000") || plain.Has("ghcr.io") {
+		t.Fatal("the repository's registry must be reached without TLS, and only it")
+	}
+	// Also when the index cannot be fetched: installed packages still
+	// update from the registry.
+	delete(e.indexes, "test://lab/index.yaml")
+	e.fetch("lab")
+	if !plain.Has("registry.lab:5000") {
+		t.Fatal("a failed fetch dropped the repository's plain HTTP registries")
+	}
+	rp := &v1.Repository{}
+	if err := e.c.Get(context.Background(), types.NamespacedName{Name: "lab"}, rp); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.c.Delete(context.Background(), rp); err != nil {
+		t.Fatal(err)
+	}
+	e.fetch("lab")
+	if plain.Has("registry.lab:5000") {
+		t.Fatal("a deleted repository's registry must use TLS again")
 	}
 }

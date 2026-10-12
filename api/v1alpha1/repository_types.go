@@ -62,6 +62,16 @@ type RepositorySpec struct {
 	// packages then install whatever the server says they are.
 	// +optional
 	AllowUnsigned bool `json:"allowUnsigned,omitempty"`
+
+	// PlainHTTPRegistries are OCI registries, host or host:port, that the
+	// charts and package trees of this repository are fetched from without
+	// TLS, such as a registry in the cluster. Every other registry keeps
+	// TLS. A registry either speaks TLS or does not, so a host listed here
+	// is reached without TLS for whatever package lives on it. The index
+	// URL itself is fetched with the scheme it names.
+	// +optional
+	// +kubebuilder:validation:items:Pattern=`^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.-]+)(:[0-9]+)?$`
+	PlainHTTPRegistries []string `json:"plainHTTPRegistries,omitempty"`
 }
 
 // RepositoryTrust pins a repository's root of trust.

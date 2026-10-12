@@ -22,6 +22,7 @@ import (
 
 	"github.com/kuberoot-dev/kubepkg/api/v1"
 	"github.com/kuberoot-dev/kubepkg/pkg/backend"
+	"github.com/kuberoot-dev/kubepkg/pkg/source"
 )
 
 func TestChartPreparerMirrorKeepsTheDigest(t *testing.T) {
@@ -41,5 +42,23 @@ func TestChartPreparerMirrorKeepsTheDigest(t *testing.T) {
 	}
 	if mirrored.Chart.Repository != "oci://registry.internal/mirror/charts.example.org" || plain.Chart.Repository != "https://charts.example.org" {
 		t.Errorf("repositories: %s, %s", plain.Chart.Repository, mirrored.Chart.Repository)
+	}
+}
+
+func TestChartPreparerMarksPlainHTTPRegistries(t *testing.T) {
+	p := ChartPreparer{PlainHTTPRegistries: source.NewRegistries("registry.lab:5000")}
+	for repo, want := range map[string]bool{
+		"oci://registry.lab:5000/charts":    true,
+		"oci://ghcr.io/kuberoot-dev/charts": false,
+		"http://registry.lab:5000/charts":   false, // a Helm repository: its scheme decides
+	} {
+		comp := &v1.Component{Name: "app", Chart: &v1.ChartRef{Repository: repo, Name: "app", Version: "1.0.0"}}
+		var c backend.Component
+		if _, err := p.Prepare(context.Background(), &v1.PackageSource{}, nil, comp, &c); err != nil {
+			t.Fatal(err)
+		}
+		if c.Chart.PlainHTTP != want {
+			t.Errorf("%s: plain HTTP %v", repo, c.Chart.PlainHTTP)
+		}
 	}
 }

@@ -33,6 +33,7 @@ Recipes (`kind: Recipe`) and bundles follow the same rules as the cluster API: w
 ## The CLI and the operator
 
 - Commands and flags of `kubepkg` and of the operator stay within 1.x. A flag may be deprecated with a warning and removed in 2.0.
+- Deprecated: the operator flag `--plain-http` and the chart value `plainHTTP` (from 1.3), which take every registry off TLS. Use `--plain-http-registry` / `plainHTTPRegistries` or a Repository's `plainHTTPRegistries`.
 - Output meant for people, such as tables and messages, may change in any release. Do not parse it.
 
 ## Go packages

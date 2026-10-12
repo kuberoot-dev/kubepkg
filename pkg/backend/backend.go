@@ -84,6 +84,8 @@ type Chart struct {
 	Version    string
 	// Digest is the sha256 of the chart archive, when known.
 	Digest string
+	// PlainHTTP means the chart's registry is reached without TLS.
+	PlainHTTP bool
 }
 
 // OCI reports whether the chart lives in an OCI registry.

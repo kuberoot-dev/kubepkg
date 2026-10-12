@@ -320,8 +320,30 @@ for crd in packages packagesources packagerevisions repositories; do
 done
 echo "  storedVersions: [v1]"
 
+step "a public registry keeps TLS next to the local plain HTTP one"
+# The operator reaches only ${REG} without TLS; a chart on ghcr.io must
+# still come over TLS.
+${K} apply -f - <<EOF
+apiVersion: kubepkg.dev/v1
+kind: PackageSource
+metadata: {name: ksm}
+spec:
+  version: "2.20.0"
+  variants:
+    - name: default
+      components:
+        - name: kube-state-metrics
+          chart: {repository: oci://ghcr.io/kuberoot-dev/kubepkg-packages/kube-state-metrics, name: kube-state-metrics, version: 2.20.0-3, digest: "sha256:2bf8279f5f6195dfb6332dfb8c1251bdcf5a00754dd97102411a614f685d329e"}
+          install: {namespace: e2e-ksm}
+---
+apiVersion: kubepkg.dev/v1
+kind: Package
+metadata: {name: ksm}
+EOF
+wait_reason ksm ReconciliationSucceeded 300
+
 step "10. delete"
-${K} delete packages.kubepkg.dev app blocked demo hello greeter salute --wait --timeout 180s >/dev/null
+${K} delete packages.kubepkg.dev app blocked demo hello greeter salute ksm --wait --timeout 180s >/dev/null
 ${K} -n e2e-hello get deploy hello >/dev/null 2>&1 && fail "deployment hello left behind"
 ${K} -n e2e-greeter get deploy hello >/dev/null 2>&1 && fail "deployment greeter/hello left behind"
 for ((i = 0; i < 30; i += 3)); do

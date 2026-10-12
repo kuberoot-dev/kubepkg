@@ -48,7 +48,7 @@ func repoIndexCmd() *cobra.Command {
 		signKeys               []string
 		expires                time.Duration
 		opts                   repo.BuildOptions
-		plainHTTP              bool
+		plainHTTP              plainHTTPFlags
 	)
 	cmd := &cobra.Command{
 		Use:   "index <dir>",
@@ -75,7 +75,11 @@ index.yaml; packages and charts stay in their registries.`,
 				}
 				opts.Base = base
 			}
-			idx, err := repo.Build(cmd.Context(), args[0], &source.Fetcher{CacheDir: cache, PlainHTTP: plainHTTP}, opts)
+			hosts, err := plainHTTP.registries()
+			if err != nil {
+				return err
+			}
+			idx, err := repo.Build(cmd.Context(), args[0], &source.Fetcher{CacheDir: cache, PlainHTTP: plainHTTP.all, PlainHTTPRegistries: hosts}, opts)
 			if err != nil {
 				return err
 			}
@@ -145,7 +149,7 @@ index.yaml; packages and charts stay in their registries.`,
 	cmd.Flags().StringVarP(&out, "output", "o", "index.yaml", "where to write the index, - for stdout")
 	cmd.Flags().BoolVar(&opts.Verify, "verify", false, "also download pinned charts and check their digests")
 	cmd.Flags().StringVar(&merge, "merge", "", "published index (file or URL) whose versions are kept; published versions must not change")
-	cmd.Flags().BoolVar(&plainHTTP, "plain-http", false, "talk to OCI registries without TLS (local registries only)")
+	plainHTTP.bind(cmd)
 	cmd.Flags().Var(relocateFlag{&opts.Relocate}, "relocate", "oci://old=oci://new: move published versions' charts and package trees to a new registry path; each chart must be there with its published digest (repeatable)")
 	cmd.Flags().StringArrayVar(&signKeys, "sign-key", nil, "sign the index with this ed25519 private key file (repeatable); signatures go next to it as .sig")
 	cmd.Flags().StringVar(&signKeyEnv, "sign-key-env", "", "also sign with the PEM private key in this environment variable, for CI secrets")

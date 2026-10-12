@@ -48,12 +48,13 @@ under the same version and build is an error.
 ```text
 kubepkg build <recipe-dir> [flags]
 
-      --cache-dir string         chart download cache (default: the user cache directory)
-  -o, --output string            directory for the published PackageSource (default "dist")
-      --plain-http               talk to registries without TLS (local registries only)
-      --registry string          OCI registry path to publish to, e.g. oci://ghcr.io/example/packages
-      --registry-config string   Docker config file with registry credentials
-      --work-dir string          where to build; kept for inspection when set
+      --cache-dir string                  chart download cache (default: the user cache directory)
+  -o, --output string                     directory for the published PackageSource (default "dist")
+      --plain-http                        talk to the --registry the package goes to without TLS (local registries only); sources keep TLS
+      --plain-http-registry stringArray   registry host[:port] a source is fetched from without TLS (repeatable); others keep TLS
+      --registry string                   OCI registry path to publish to, e.g. oci://ghcr.io/example/packages
+      --registry-config string            Docker config file with registry credentials
+      --work-dir string                   where to build; kept for inspection when set
 ```
 
 ## kubepkg bundle create
@@ -75,15 +76,16 @@ those unless told to accept them.
 ```text
 kubepkg bundle create <package>[@constraint]... -o <file.tar> [flags]
 
-      --allow-unsigned           accept an index nobody signed, for local testing
-  -o, --output string            bundle file to write
-      --plain-http               talk to registries without TLS (local registries only)
-      --public-key stringArray   trust indexes signed with this ed25519 public key file (repeatable)
-      --registry-config string   Docker config file with registry credentials
-      --repo stringArray         repository index URL, highest priority first (repeatable; default: the cluster's repositories)
-      --root-key stringArray     trust a repository with a root of trust through this pinned root key file (repeatable)
-      --root-threshold int32     how many pinned root keys must have signed version 1 of the root (default 1)
-      --variant string           variant whose requirements are resolved (default: default)
+      --allow-unsigned                    accept an index nobody signed, for local testing
+  -o, --output string                     bundle file to write
+      --plain-http                        talk to every registry without TLS (local registries only; prefer --plain-http-registry)
+      --plain-http-registry stringArray   registry host[:port] to reach without TLS, e.g. a local registry (repeatable); others keep TLS
+      --public-key stringArray            trust indexes signed with this ed25519 public key file (repeatable)
+      --registry-config string            Docker config file with registry credentials
+      --repo stringArray                  repository index URL, highest priority first (repeatable; default: the cluster's repositories)
+      --root-key stringArray              trust a repository with a root of trust through this pinned root key file (repeatable)
+      --root-threshold int32              how many pinned root keys must have signed version 1 of the root (default 1)
+      --variant string                    variant whose requirements are resolved (default: default)
 ```
 
 ## kubepkg bundle import
@@ -172,9 +174,10 @@ by namespace and owner, and fails when there is any.
 ```text
 kubepkg images <recipe-dir> | --cluster [flags]
 
-      --cluster                  check the images running in package namespaces against what the packages pin
-      --plain-http               talk to registries without TLS (local registries only)
-      --registry-config string   Docker config file with registry credentials
+      --cluster                           check the images running in package namespaces against what the packages pin
+      --plain-http                        talk to every registry without TLS (local registries only; prefer --plain-http-registry)
+      --plain-http-registry stringArray   registry host[:port] to reach without TLS, e.g. a local registry (repeatable); others keep TLS
+      --registry-config string            Docker config file with registry credentials
 ```
 
 ## kubepkg init
@@ -194,15 +197,16 @@ the package deploys on its own, then run "kubepkg validate".
 ```text
 kubepkg init <dir> [flags]
 
-      --chart string             upstream chart, <repository>/<name>@<version>, e.g. oci://ghcr.io/org/charts/app@1.2.3
-      --description string       one line about the package (default: the chart's)
-      --manifest stringArray     URL of upstream release manifests (repeatable)
-      --name string              package name (default: the directory name)
-      --namespace string         install namespace (default: the package name)
-      --no-images                do not pin images (no registry access); fill package.images later with kubepkg images
-      --plain-http               talk to registries without TLS (local registries only)
-      --registry-config string   Docker config file with registry credentials, for pinning private images
-      --version string           upstream version (default: the chart's appVersion)
+      --chart string                      upstream chart, <repository>/<name>@<version>, e.g. oci://ghcr.io/org/charts/app@1.2.3
+      --description string                one line about the package (default: the chart's)
+      --manifest stringArray              URL of upstream release manifests (repeatable)
+      --name string                       package name (default: the directory name)
+      --namespace string                  install namespace (default: the package name)
+      --no-images                         do not pin images (no registry access); fill package.images later with kubepkg images
+      --plain-http                        talk to every registry without TLS (local registries only; prefer --plain-http-registry)
+      --plain-http-registry stringArray   registry host[:port] to reach without TLS, e.g. a local registry (repeatable); others keep TLS
+      --registry-config string            Docker config file with registry credentials, for pinning private images
+      --version string                    upstream version (default: the chart's appVersion)
 ```
 
 ## kubepkg install
@@ -306,12 +310,13 @@ Subscribe the cluster to a package repository
 ```text
 kubepkg repo add <name> <index-url> [flags]
 
-      --allow-unsigned           accept an index nobody signed, for local testing
-      --interval duration        how often the operator refreshes the index (default 10m)
-      --priority int32           the highest priority repository carrying a package supplies it
-      --public-key stringArray   trust indexes signed with this ed25519 public key file (repeatable)
-      --root-key stringArray     trust a repository with a root of trust through this pinned root key file (repeatable)
-      --root-threshold int32     how many pinned root keys must have signed version 1 of the root (default 1)
+      --allow-unsigned                    accept an index nobody signed, for local testing
+      --interval duration                 how often the operator refreshes the index (default 10m)
+      --plain-http-registry stringArray   registry host[:port] the operator fetches this repository's charts from without TLS (repeatable)
+      --priority int32                    the highest priority repository carrying a package supplies it
+      --public-key stringArray            trust indexes signed with this ed25519 public key file (repeatable)
+      --root-key stringArray              trust a repository with a root of trust through this pinned root key file (repeatable)
+      --root-threshold int32              how many pinned root keys must have signed version 1 of the root (default 1)
 ```
 
 ## kubepkg repo index
@@ -327,14 +332,15 @@ index.yaml; packages and charts stay in their registries.
 ```text
 kubepkg repo index <dir> [flags]
 
-      --expires duration       how long clients accept the index; required by repositories with a root (e.g. 720h)
-      --merge string           published index (file or URL) whose versions are kept; published versions must not change
-  -o, --output string          where to write the index, - for stdout (default "index.yaml")
-      --plain-http             talk to OCI registries without TLS (local registries only)
-      --relocate old=new       oci://old=oci://new: move published versions' charts and package trees to a new registry path; each chart must be there with its published digest (repeatable)
-      --sign-key stringArray   sign the index with this ed25519 private key file (repeatable); signatures go next to it as .sig
-      --sign-key-env string    also sign with the PEM private key in this environment variable, for CI secrets
-      --verify                 also download pinned charts and check their digests
+      --expires duration                  how long clients accept the index; required by repositories with a root (e.g. 720h)
+      --merge string                      published index (file or URL) whose versions are kept; published versions must not change
+  -o, --output string                     where to write the index, - for stdout (default "index.yaml")
+      --plain-http                        talk to every registry without TLS (local registries only; prefer --plain-http-registry)
+      --plain-http-registry stringArray   registry host[:port] to reach without TLS, e.g. a local registry (repeatable); others keep TLS
+      --relocate old=new                  oci://old=oci://new: move published versions' charts and package trees to a new registry path; each chart must be there with its published digest (repeatable)
+      --sign-key stringArray              sign the index with this ed25519 private key file (repeatable); signatures go next to it as .sig
+      --sign-key-env string               also sign with the PEM private key in this environment variable, for CI secrets
+      --verify                            also download pinned charts and check their digests
 ```
 
 ## kubepkg repo keygen
@@ -532,7 +538,8 @@ is searched for recipes below it.
 ```text
 kubepkg validate <recipe-dir>... [flags]
 
-      --plain-http   talk to registries without TLS (local registries only)
+      --plain-http                        talk to every registry without TLS (local registries only; prefer --plain-http-registry)
+      --plain-http-registry stringArray   registry host[:port] to reach without TLS, e.g. a local registry (repeatable); others keep TLS
 ```
 
 ## kubepkg version

@@ -74,7 +74,7 @@ start_operator() {
   step "start operator"
   kind get kubeconfig --name "${CLUSTER}" > "${WORK}/kubeconfig"
   "${ROOT}/bin/kubepkg-operator" --kubeconfig "${WORK}/kubeconfig" \
-    --plain-http --cache-dir "${WORK}/cache" --metrics-bind-address 0 --health-probe-bind-address 0 \
+    --plain-http-registry "${REG}" --cache-dir "${WORK}/cache" --metrics-bind-address 0 --health-probe-bind-address 0 \
     "$@" >"${OPLOG}" 2>&1 &
   OP_PID=$!
   sleep 3

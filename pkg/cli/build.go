@@ -34,6 +34,7 @@ func buildCmd() *cobra.Command {
 	var (
 		registry, out, workDir, cacheDir string
 		push                             source.PushOptions
+		plainHTTP                        plainHTTPFlags
 	)
 	cmd := &cobra.Command{
 		Use:   "build <recipe-dir>",
@@ -65,7 +66,11 @@ under the same version and build is an error.`,
 				}
 				cacheDir = filepath.Join(d, "kubepkg")
 			}
-			fetcher := &source.Fetcher{CacheDir: cacheDir, PlainHTTP: push.PlainHTTP, CredentialsFile: push.CredentialsFile}
+			sources, err := plainHTTP.registries()
+			if err != nil {
+				return err
+			}
+			fetcher := &source.Fetcher{CacheDir: cacheDir, PlainHTTP: push.PlainHTTP, PlainHTTPRegistries: sources, CredentialsFile: push.CredentialsFile}
 			if registry != "" {
 				// --plain-http is for the registry the package goes to;
 				// public sources such as ghcr.io stay on TLS.
@@ -125,7 +130,8 @@ under the same version and build is an error.`,
 	cmd.Flags().StringVarP(&out, "output", "o", "dist", "directory for the published PackageSource")
 	cmd.Flags().StringVar(&workDir, "work-dir", "", "where to build; kept for inspection when set")
 	cmd.Flags().StringVar(&cacheDir, "cache-dir", "", "chart download cache (default: the user cache directory)")
-	cmd.Flags().BoolVar(&push.PlainHTTP, "plain-http", false, "talk to registries without TLS (local registries only)")
+	cmd.Flags().BoolVar(&push.PlainHTTP, "plain-http", false, "talk to the --registry the package goes to without TLS (local registries only); sources keep TLS")
+	cmd.Flags().StringArrayVar(&plainHTTP.hosts, "plain-http-registry", nil, "registry host[:port] a source is fetched from without TLS (repeatable); others keep TLS")
 	cmd.Flags().StringVar(&push.CredentialsFile, "registry-config", "", "Docker config file with registry credentials")
 	return cmd
 }

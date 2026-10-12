@@ -24,7 +24,7 @@ step "1. install Flux"
 ${K} apply -f https://github.com/fluxcd/flux2/releases/latest/download/install.yaml >/dev/null
 ${K} -n flux-system wait deploy/source-controller deploy/helm-controller --for=condition=Available --timeout=5m >/dev/null || fail "Flux did not start"
 
-start_operator --backend flux
+start_operator --backend flux --plain-http-registry "${REG_NAME}:5000"
 
 step "2. build and publish a package"
 "${ROOT}/bin/kubepkg" build "${HERE}/recipes/hello" --registry "oci://${REG}/packages" --plain-http -o "${WORK}/dist" 2>/dev/null

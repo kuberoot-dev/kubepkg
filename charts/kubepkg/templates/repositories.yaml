@@ -27,4 +27,7 @@ spec:
   {{- if .allowUnsigned }}
   allowUnsigned: true
   {{- end }}
+  {{- with .plainHTTPRegistries }}
+  plainHTTPRegistries: {{- toYaml . | nindent 4 }}
+  {{- end }}
 {{- end }}

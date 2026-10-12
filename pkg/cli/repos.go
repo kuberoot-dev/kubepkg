@@ -30,13 +30,15 @@ import (
 
 	"github.com/kuberoot-dev/kubepkg/api/v1"
 	"github.com/kuberoot-dev/kubepkg/pkg/repo"
+	"github.com/kuberoot-dev/kubepkg/pkg/source"
 )
 
 func repoAddCmd(cl *cluster) *cobra.Command {
 	var (
-		priority int32
-		interval time.Duration
-		trust    trustFlags
+		priority  int32
+		interval  time.Duration
+		trust     trustFlags
+		plainHTTP []string
 	)
 	cmd := &cobra.Command{
 		Use:   "add <name> <index-url>",
@@ -51,7 +53,12 @@ func repoAddCmd(cl *cluster) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			spec.URL, spec.Priority = args[1], priority
+			spec.URL, spec.Priority, spec.PlainHTTPRegistries = args[1], priority, plainHTTP
+			for _, h := range plainHTTP {
+				if err := source.CheckRegistryHost(h); err != nil {
+					return fmt.Errorf("--plain-http-registry: %w", err)
+				}
+			}
 			if _, _, _, err := repo.LoadRepository(cmd.Context(), cl.fetchers, spec, v1.RepositoryStatus{}, time.Now()); err != nil {
 				return fmt.Errorf("index at %s: %w", args[1], err)
 			}
@@ -68,6 +75,7 @@ func repoAddCmd(cl *cluster) *cobra.Command {
 	}
 	cmd.Flags().Int32Var(&priority, "priority", 0, "the highest priority repository carrying a package supplies it")
 	cmd.Flags().DurationVar(&interval, "interval", 0, "how often the operator refreshes the index (default 10m)")
+	cmd.Flags().StringArrayVar(&plainHTTP, "plain-http-registry", nil, "registry host[:port] the operator fetches this repository's charts from without TLS (repeatable)")
 	trust.bind(cmd)
 	return cmd
 }

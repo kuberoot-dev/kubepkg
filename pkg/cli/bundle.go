@@ -33,7 +33,6 @@ import (
 
 	"github.com/kuberoot-dev/kubepkg/api/v1"
 	"github.com/kuberoot-dev/kubepkg/pkg/bundle"
-	"github.com/kuberoot-dev/kubepkg/pkg/images"
 	"github.com/kuberoot-dev/kubepkg/pkg/source"
 )
 
@@ -131,7 +130,7 @@ func bundleCreateCmd(cl *cluster) *cobra.Command {
 		output, variant, registryConfig string
 		repos                           []string
 		trust                           trustFlags
-		plainHTTP                       bool
+		plainHTTP                       plainHTTPFlags
 	)
 	cmd := &cobra.Command{
 		Use:   "create <package>[@constraint]... -o <file.tar>",
@@ -185,7 +184,7 @@ those unless told to accept them.`,
 			f.CredentialsFile = registryConfig
 			m, err := bundle.Create(ctx, work, rec, sel, bundle.CreateOptions{
 				Charts:   f,
-				Registry: images.Resolver{CredentialsFile: registryConfig, PlainHTTP: plainHTTP},
+				Registry: *plainHTTP.resolver(registryConfig),
 				Warn:     cmd.ErrOrStderr(),
 				Now:      time.Now(),
 			})
@@ -211,7 +210,7 @@ those unless told to accept them.`,
 	cmd.Flags().StringArrayVar(&repos, "repo", nil, "repository index URL, highest priority first (repeatable; default: the cluster's repositories)")
 	cmd.Flags().StringVar(&variant, "variant", "", "variant whose requirements are resolved (default: default)")
 	cmd.Flags().StringVar(&registryConfig, "registry-config", "", "Docker config file with registry credentials")
-	cmd.Flags().BoolVar(&plainHTTP, "plain-http", false, "talk to registries without TLS (local registries only)")
+	plainHTTP.bind(cmd)
 	trust.bind(cmd)
 	return cmd
 }

@@ -180,7 +180,7 @@ func (b *Backend) RenderSource(c backend.Component) (*unstructured.Unstructured,
 		u.SetKind("HelmRepository")
 		spec["url"] = c.Chart.Repository
 	}
-	if b.Insecure {
+	if b.Insecure || (c.Chart.OCI() && c.Chart.PlainHTTP) {
 		spec["insecure"] = true
 	}
 	u.Object["spec"] = spec

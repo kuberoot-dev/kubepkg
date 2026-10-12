@@ -184,3 +184,22 @@ func TestUninstallWaitsForTheHelmController(t *testing.T) {
 		t.Fatalf("once the HelmRelease is gone: %v", err)
 	}
 }
+
+func TestPlainHTTPRegistryMakesOnlyItsSourceInsecure(t *testing.T) {
+	c := component()
+	c.Chart.PlainHTTP = true
+	src, err := (&Backend{}).RenderSource(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src.Object["spec"].(map[string]any)["insecure"] != true {
+		t.Error("a chart in a plain HTTP registry needs an insecure OCIRepository")
+	}
+	src, err = (&Backend{}).RenderSource(component())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := src.Object["spec"].(map[string]any)["insecure"]; ok {
+		t.Error("other registries keep TLS")
+	}
+}
