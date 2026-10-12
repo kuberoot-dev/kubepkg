@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"sort"
 	"strings"
@@ -37,21 +39,89 @@ type IndexFetcher interface {
 	FetchIndex(ctx context.Context, url string) ([]byte, error)
 }
 
-// HTTPFetcher fetches indexes over HTTP(S).
-type HTTPFetcher struct{}
+// HTTPFetcher fetches indexes over HTTP(S). With a Cache it asks the
+// server whether a file changed since it last fetched it (ETag,
+// Last-Modified), so refreshing an unchanged repository downloads nothing.
+type HTTPFetcher struct {
+	Cache *HTTPCache
+}
 
 // FetchIndex implements IndexFetcher.
-func (HTTPFetcher) FetchIndex(ctx context.Context, u string) ([]byte, error) {
-	return source.Download(ctx, u, maxIndexBytes)
+func (f HTTPFetcher) FetchIndex(ctx context.Context, u string) ([]byte, error) {
+	if f.Cache == nil {
+		return source.Download(ctx, u, maxIndexBytes)
+	}
+	return f.Cache.fetch(ctx, u)
+}
+
+// HTTPCache keeps the last response for each URL with its validators.
+type HTTPCache struct {
+	mu      sync.Mutex
+	entries map[string]cachedResponse
+}
+
+type cachedResponse struct {
+	etag, lastModified string
+	body               []byte
+}
+
+func (c *HTTPCache) fetch(ctx context.Context, u string) ([]byte, error) {
+	c.mu.Lock()
+	prev, ok := c.entries[u]
+	c.mu.Unlock()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	if ok && prev.etag != "" {
+		req.Header.Set("If-None-Match", prev.etag)
+	}
+	if ok && prev.lastModified != "" {
+		req.Header.Set("If-Modified-Since", prev.lastModified)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch {
+	case resp.StatusCode == http.StatusNotModified && ok:
+		return prev.body, nil
+	case resp.StatusCode == http.StatusNotFound:
+		return nil, fmt.Errorf("GET %s: %w", u, source.ErrNotFound)
+	case resp.StatusCode != http.StatusOK:
+		return nil, fmt.Errorf("GET %s: %s", u, resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxIndexBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxIndexBytes {
+		return nil, fmt.Errorf("GET %s: more than %d bytes", u, maxIndexBytes)
+	}
+	entry := cachedResponse{etag: resp.Header.Get("ETag"), lastModified: resp.Header.Get("Last-Modified"), body: body}
+	c.mu.Lock()
+	if entry.etag == "" && entry.lastModified == "" {
+		delete(c.entries, u) // nothing to ask with next time
+	} else {
+		if c.entries == nil {
+			c.entries = map[string]cachedResponse{}
+		}
+		c.entries[u] = entry
+	}
+	c.mu.Unlock()
+	return body, nil
 }
 
 // Fetchers pick an IndexFetcher by URL scheme. A distribution adds its own
 // schemes, e.g. for an internal artifact store.
 type Fetchers map[string]IndexFetcher
 
-// DefaultFetchers handle http:// and https://.
+// DefaultFetchers handle http:// and https://, asking the server whether
+// an index changed before downloading it again.
 func DefaultFetchers() Fetchers {
-	return Fetchers{"http": HTTPFetcher{}, "https": HTTPFetcher{}}
+	f := HTTPFetcher{Cache: &HTTPCache{}}
+	return Fetchers{"http": f, "https": f}
 }
 
 // Fetch downloads the index at u with the fetcher for its scheme.

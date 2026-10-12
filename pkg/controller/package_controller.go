@@ -34,6 +34,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -1067,7 +1068,7 @@ func (r *PackageReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&v1.PackageSource{}, sameName).
 		Watches(&v1.Package{}, waiting)
 	if r.Repositories != nil {
-		b = b.Watches(&v1.Repository{}, allPackages(mgr.GetClient()))
+		b = b.Watches(&v1.Repository{}, allPackages(mgr.GetClient()), builder.WithPredicates(indexChanged()))
 	}
 	return b.Complete(r)
 }

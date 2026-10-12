@@ -44,6 +44,14 @@ The `Ready` condition of a repository has one of these reasons:
 
 A refused or failed refresh never removes packages. The index accepted before stays in use until a valid newer one arrives.
 
+The operator fetches the index again every `interval`, and a minute after a failed fetch. It asks the server whether the index changed since the last fetch (`ETag`, `Last-Modified`), so an unchanged index is not downloaded again, and an index that did not change does not make packages select their versions again. To fetch it now, change any annotation on the Repository:
+
+```bash
+kubectl annotate repository main kubepkg.dev/refresh="$(date +%s)" --overwrite
+```
+
+A new version or build that matches a Package's constraint is installed as soon as the index that carries it is accepted, also when the package is waiting to retry a failed change.
+
 ## Which repository a package comes from
 
 When several repositories carry the same package, the one with the highest `priority` supplies it, **even when it has no version matching your constraint**. Without that rule, a package your vendor's repository carries could silently come from a community repository just because the community had a newer number. Within the chosen repository, the newest version and build matching the constraint wins.

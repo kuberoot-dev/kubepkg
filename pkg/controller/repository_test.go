@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	"github.com/kuberoot-dev/kubepkg/api/v1"
 	"github.com/kuberoot-dev/kubepkg/pkg/repo"
@@ -254,5 +255,28 @@ func TestSignedRepositories(t *testing.T) {
 	e.reconcile("app")
 	if v := e.source("app").Spec.Version; v != "1.1.0" {
 		t.Fatalf("the newer accepted index must stay in use, got %s", v)
+	}
+}
+
+func TestOnlyANewIndexMakesPackagesSelectAgain(t *testing.T) {
+	loaded := func(digest string, gen int64) *v1.Repository {
+		rp := &v1.Repository{ObjectMeta: metav1.ObjectMeta{Name: "main", Generation: gen}}
+		rp.Status.IndexDigest = digest
+		rp.Status.LastFetched = &metav1.Time{Time: time.Now()}
+		meta.SetStatusCondition(&rp.Status.Conditions, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "IndexLoaded"})
+		return rp
+	}
+	p := indexChanged()
+	same := loaded("sha256:a", 1)
+	refreshed := loaded("sha256:a", 1)
+	refreshed.Status.LastFetched = &metav1.Time{Time: time.Now().Add(10 * time.Minute)}
+	if p.Update(event.UpdateEvent{ObjectOld: same, ObjectNew: refreshed}) {
+		t.Fatal("a refresh that found the same index reconciles every package")
+	}
+	if !p.Update(event.UpdateEvent{ObjectOld: same, ObjectNew: loaded("sha256:b", 1)}) {
+		t.Fatal("a new index must reach the packages")
+	}
+	if !p.Update(event.UpdateEvent{ObjectOld: same, ObjectNew: loaded("sha256:a", 2)}) {
+		t.Fatal("a spec change, such as the priority, must reach the packages")
 	}
 }

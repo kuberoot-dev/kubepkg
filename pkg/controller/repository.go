@@ -30,9 +30,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/kuberoot-dev/kubepkg/api/v1"
@@ -130,12 +133,32 @@ func (r *RepositoryReconciler) load(ctx context.Context, rp *v1.Repository) (*re
 	return idx, "sha256:" + hex.EncodeToString(sum[:]), "", nil
 }
 
-// SetupWithManager registers the controller.
+// SetupWithManager registers the controller. The index is fetched again
+// every interval, when the spec changes, and when someone changes an
+// annotation to have it fetched now; the controller's own status writes
+// do not start another fetch.
 func (r *RepositoryReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("kubepkg-repository").
-		For(&v1.Repository{}).
+		For(&v1.Repository{}, builder.WithPredicates(predicate.Or(predicate.GenerationChangedPredicate{}, predicate.AnnotationChangedPredicate{}))).
 		Complete(r)
+}
+
+// indexChanged lets through the Repository changes that can change what
+// packages select: another accepted index, another spec, readiness. A
+// refresh that found the same index changes none of them, so it does not
+// make every package reconcile.
+func indexChanged() predicate.Predicate {
+	return predicate.Funcs{UpdateFunc: func(e event.UpdateEvent) bool {
+		before, okb := e.ObjectOld.(*v1.Repository)
+		after, oka := e.ObjectNew.(*v1.Repository)
+		if !okb || !oka {
+			return true
+		}
+		return before.Generation != after.Generation ||
+			before.Status.IndexDigest != after.Status.IndexDigest ||
+			isReady(before.Status.Conditions) != isReady(after.Status.Conditions)
+	}}
 }
 
 // selectSource makes the PackageSource of a package from the repositories
