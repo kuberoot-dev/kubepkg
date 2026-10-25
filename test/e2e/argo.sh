@@ -48,7 +48,10 @@ WWW_PID=$!
 
 step "2. install Argo CD"
 ${K} create namespace argocd >/dev/null
-${K} apply -n argocd --server-side -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml >/dev/null
+# A fixed release: stable moves, and a new one broke the suite with nothing
+# changed here (the repo server timed out on its Redis).
+ARGOCD_VERSION=${ARGOCD_VERSION:-v3.5.4}
+${K} apply -n argocd --server-side -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml" >/dev/null
 ${K} -n argocd rollout status deploy/argocd-repo-server --timeout=10m >/dev/null || fail "argocd-repo-server did not start"
 ${K} -n argocd rollout status statefulset/argocd-application-controller --timeout=10m >/dev/null || fail "argocd-application-controller did not start"
 
