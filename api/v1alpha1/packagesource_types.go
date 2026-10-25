@@ -275,7 +275,9 @@ type ComponentInstall struct {
 	DependsOn []string `json:"dependsOn,omitempty"`
 
 	// UpgradeCRDs controls how CRDs from the chart's crds/ directory are
-	// handled on upgrades. Empty keeps the backend default (Skip).
+	// handled on upgrades. Empty keeps the backend default (Skip). With
+	// Create or CreateReplace, kubepkg also applies them on the first
+	// install, taking over CRDs that already exist.
 	// Use "CreateReplace" for operators that evolve their CRD set between
 	// versions. Warning: CreateReplace overwrites CRDs and may cause data
 	// loss if upstream drops fields from a CRD with live objects.
