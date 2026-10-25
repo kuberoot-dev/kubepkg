@@ -126,6 +126,16 @@ func (b *Backend) Apply(ctx context.Context, c backend.Component) (backend.State
 		// package rolls back, so Helm must not uninstall it on its own.
 		in.RollbackOnFailure = false
 		in.TakeOwnership = c.Adopt
+		// A component that manages its CRDs applies them itself, with
+		// ownership forced, as on upgrades: CRDs that already exist, put
+		// there by an operator, an earlier tool or kubectl, would otherwise
+		// fail Helm's first apply with a field manager conflict.
+		if c.UpgradeCRDs == "Create" || c.UpgradeCRDs == "CreateReplace" {
+			if err := applyCRDs(ctx, b.getter, ch, values); err != nil {
+				return backend.State{}, fmt.Errorf("install CRDs of %s: %w", c.Key(), err)
+			}
+			in.SkipCRDs = true
+		}
 		if _, err := in.RunWithContext(ctx, ch, values); err != nil {
 			return b.stateAfter(ctx, c, fmt.Errorf("install %s: %w", c.Key(), err))
 		}
