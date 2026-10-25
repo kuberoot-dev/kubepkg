@@ -48,10 +48,14 @@ WWW_PID=$!
 
 step "2. install Argo CD"
 ${K} create namespace argocd >/dev/null
-# A fixed release: stable moves, and a new one broke the suite with nothing
-# changed here (the repo server timed out on its Redis).
+# A fixed release, so the suite does not change when stable does.
 ARGOCD_VERSION=${ARGOCD_VERSION:-v3.5.4}
 ${K} apply -n argocd --server-side -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml" >/dev/null
+# The suite does not need Argo CD's network policies, and on kind they let a
+# fresh pod through only after a while: the repo server then timed out on
+# Redis and the suite failed now and then.
+${K} -n argocd delete networkpolicy --all >/dev/null
+${K} -n argocd rollout status deploy/argocd-redis --timeout=10m >/dev/null || fail "argocd-redis did not start"
 ${K} -n argocd rollout status deploy/argocd-repo-server --timeout=10m >/dev/null || fail "argocd-repo-server did not start"
 ${K} -n argocd rollout status statefulset/argocd-application-controller --timeout=10m >/dev/null || fail "argocd-application-controller did not start"
 
