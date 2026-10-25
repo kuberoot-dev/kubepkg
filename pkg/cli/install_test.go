@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Masterminds/semver/v3"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -268,5 +269,33 @@ func TestPlanShowsVariantsAndValuesFromRequiringPackages(t *testing.T) {
 	// from the requiring package, so they go when it goes.
 	if p.Spec.Variant != "lite" || len(p.Spec.Components) != 0 {
 		t.Fatalf("vm spec = %+v", p.Spec)
+	}
+}
+
+func TestDefaultConstraintKeepsPreRelease(t *testing.T) {
+	for version, want := range map[string]string{
+		"1.4.2":       "~1.4",
+		"0.2.0-rc.2":  "~0.2.0-rc.2",
+		"not-semver!": "",
+	} {
+		got := defaultConstraint(version)
+		if got != want {
+			t.Errorf("defaultConstraint(%q) = %q, want %q", version, got, want)
+			continue
+		}
+		if want == "" {
+			continue
+		}
+		c, err := semver.NewConstraint(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !c.Check(semver.MustParse(version)) {
+			t.Errorf("%s does not accept %s, the version it was made from", got, version)
+		}
+	}
+	c, _ := semver.NewConstraint(defaultConstraint("0.2.0-rc.2"))
+	if !c.Check(semver.MustParse("0.2.0")) || c.Check(semver.MustParse("0.3.0")) {
+		t.Errorf("%s should follow 0.2 up to the release and no further", c)
 	}
 }

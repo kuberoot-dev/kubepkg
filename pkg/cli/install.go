@@ -154,11 +154,16 @@ func requiredConstraints(cat resolve.Catalog, p resolve.Plan) map[string]string 
 	return out
 }
 
-// defaultConstraint follows patch releases of a version: ~X.Y.
+// defaultConstraint follows patch releases of a version: ~X.Y. A
+// pre-release is kept in the constraint, since ~X.Y matches no pre-release
+// and the package would refuse the very version it was installed at.
 func defaultConstraint(version string) string {
 	v, err := semver.NewVersion(version)
 	if err != nil || version == resolve.Unversioned {
 		return ""
+	}
+	if v.Prerelease() != "" {
+		return "~" + v.String()
 	}
 	return fmt.Sprintf("~%d.%d", v.Major(), v.Minor())
 }
