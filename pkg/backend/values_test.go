@@ -98,3 +98,48 @@ func TestPlatformValuesFollowAStrictSchema(t *testing.T) {
 		}
 	}
 }
+
+func TestPlatformValuesFollowRootSchemaReference(t *testing.T) {
+	for _, schema := range []string{
+		`{"$ref":"#/$defs/helm-values","$defs":{"helm-values":{"additionalProperties":false,"properties":{"global":{}}}}}`,
+		`{"$ref":"#/definitions/entry","definitions":{"entry":{"$ref":"#/$defs/helm~1values~0v1"}},"$defs":{"helm/values~v1":{"additionalProperties":false,"properties":{"global":{}}}}}`,
+		`{"$ref":"#/$defs/helm%20values","$defs":{"helm values":{"additionalProperties":false,"properties":{"global":{}}}}}`,
+	} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "values.schema.json"), []byte(schema), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		sec := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "system", Name: "platform"},
+			Data: map[string][]byte{"values.yaml": []byte("linstorNode: {systemd: false}\nglobal: {domain: example.org}\n")}}
+		got, err := ResolveValues(context.Background(), fake.NewClientset(sec), Component{
+			ChartDir: dir, ValuesFromSecrets: []string{"system/platform"},
+			Values: map[string]any{"explicitUnknown": true},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := got["linstorNode"]; ok {
+			t.Fatalf("unaccepted platform key survived schema %s", schema)
+		}
+		if got["global"] == nil || got["explicitUnknown"] != true {
+			t.Fatalf("accepted platform or explicit package values lost: %v", got)
+		}
+	}
+}
+
+func TestUnresolvedRootSchemaReferencesAreLeftToHelm(t *testing.T) {
+	for _, schema := range []string{
+		`{"$ref":"https://example.org/schema.json"}`,
+		`{"$ref":"#/$defs/missing"}`,
+		`{"$ref":"#/$defs/loop","$defs":{"loop":{"$ref":"#/$defs/loop"}}}`,
+	} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "values.schema.json"), []byte(schema), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got, err := AcceptedBySchema(map[string]any{"linstorNode": true}, dir)
+		if err != nil || got["linstorNode"] != true {
+			t.Fatalf("schema %s: got %v, %v", schema, got, err)
+		}
+	}
+}

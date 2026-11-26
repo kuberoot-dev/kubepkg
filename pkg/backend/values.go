@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -81,13 +82,40 @@ func AcceptedBySchema(platform map[string]any, chartDir string) (map[string]any,
 		return nil, err
 	}
 	var schema struct {
+		Ref                  string                     `json:"$ref"`
 		AdditionalProperties *bool                      `json:"additionalProperties"`
 		Properties           map[string]json.RawMessage `json:"properties"`
 		PatternProperties    map[string]json.RawMessage `json:"patternProperties"`
 	}
-	if err := json.Unmarshal(raw, &schema); err != nil {
-		// Helm will report a broken schema; nothing to filter by.
-		return platform, nil
+	// Some charts (including cert-manager) put the root schema in $defs
+	// and expose it through a document-local reference. Follow references
+	// against the original document, not the previously resolved fragment.
+	document := raw
+	seen := map[string]bool{}
+	for {
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			// Helm will report a broken schema; nothing to filter by.
+			return platform, nil
+		}
+		if schema.Ref == "" {
+			break
+		}
+		ref := schema.Ref
+		if seen[ref] {
+			return platform, nil
+		}
+		seen[ref] = true
+		var ok bool
+		raw, ok = localSchemaReference(document, ref)
+		if !ok {
+			// Remote or invalid references remain Helm's responsibility.
+			return platform, nil
+		}
+		// Unmarshal does not clear fields absent from the next fragment.
+		schema.Ref = ""
+		schema.AdditionalProperties = nil
+		schema.Properties = nil
+		schema.PatternProperties = nil
 	}
 	if schema.AdditionalProperties == nil || *schema.AdditionalProperties {
 		return platform, nil
@@ -109,4 +137,30 @@ func AcceptedBySchema(platform map[string]any, chartDir string) (map[string]any,
 		}
 	}
 	return out, nil
+}
+
+// localSchemaReference resolves an object JSON Pointer in this document.
+// It never fetches remote schemas or reads another file.
+func localSchemaReference(document json.RawMessage, ref string) (json.RawMessage, bool) {
+	if !strings.HasPrefix(ref, "#/") {
+		return nil, false
+	}
+	pointer, err := url.PathUnescape(strings.TrimPrefix(ref, "#"))
+	if err != nil {
+		return nil, false
+	}
+	raw := document
+	for _, part := range strings.Split(strings.TrimPrefix(pointer, "/"), "/") {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &object); err != nil {
+			return nil, false
+		}
+		key := strings.NewReplacer("~1", "/", "~0", "~").Replace(part)
+		var ok bool
+		raw, ok = object[key]
+		if !ok {
+			return nil, false
+		}
+	}
+	return raw, true
 }
